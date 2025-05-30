@@ -1,41 +1,36 @@
-# Core web framework (choose one)
-# flask>=2.3.0
-# fastapi>=0.100.0
-# django>=4.2.0
+# Core web framework
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
 
 # Database and ORM
-# sqlalchemy>=2.0.0
-# alembic>=1.11.0  # For database migrations
-# psycopg2-binary>=2.9.0  # PostgreSQL adapter
-# pymysql>=1.1.0  # MySQL adapter
+sqlalchemy>=2.0.0
+asyncpg>=0.29.0  # PostgreSQL async adapter
+alembic>=1.12.0  # For database migrations
 
 # Event Bus / Message Queue
-# kafka-python>=2.0.0
-# celery>=5.3.0
-# redis>=4.6.0
+aiokafka>=0.9.0  # Async Kafka client
+# kafka-python>=2.0.0  # Sync Kafka client (if needed)
+
+# Configuration
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
 
 # Authentication and Security
-# pyjwt>=2.8.0
-# passlib>=1.7.4
-# python-jose>=3.3.0
-# bcrypt>=4.0.0
-
-# API and Serialization
-# pydantic>=2.0.0
-# marshmallow>=3.20.0
-
-# Development and Testing
-# pytest>=7.4.0
-# pytest-asyncio>=0.21.0
-# black>=23.7.0
-# flake8>=6.0.0
-# mypy>=1.5.0
+pyjwt>=2.8.0
+passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
 
 # Utilities
-# python-dotenv>=1.0.0  # Environment variables
-# requests>=2.31.0
-# python-dateutil>=2.8.0
+python-dotenv>=1.0.0  # Environment variables
+requests>=2.31.0
+python-dateutil>=2.8.0
+
+# Development and Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.11.0
+flake8>=6.1.0
+mypy>=1.7.0
 
 # Monitoring and Logging
-# prometheus-client>=0.17.0
-# structlog>=23.1.0 
+structlog>=23.2.0 
