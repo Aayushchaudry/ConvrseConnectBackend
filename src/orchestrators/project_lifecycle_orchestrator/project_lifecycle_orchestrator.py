@@ -1,0 +1,211 @@
+# src/orchestrators/project_lifecycle_orchestrator/project_lifecycle_orchestrator.py (UPDATED)
+
+import logging
+import uuid
+from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Type, Callable, Dict, Any, Optional
+from uuid import UUID
+
+from src.config.database import AsyncSessionLocal # Can be used as db_session_factory
+from src.models.saga_state import SagaState, SagaStatus, SagaType
+from src.models.project import ProjectStatus # Already imported
+from src.events.event_bus_interface import EventBus
+from src.events.project_events import ProjectCreatedEvent, DeliverableDeliveredEvent, DeliverableFailedEvent, ProjectCompletedEvent, ProjectFailedEvent
+from src.commands.project_commands import StartInformationGatheringCommand, StartDeliverableSagaCommand
+from src.orchestrators.project_lifecycle_orchestrator.states import ProjectSagaState
+from src.orchestrators.saga_processor import SagaProcessor # <--- NEW IMPORT: Import the SagaProcessor
+
+logger = logging.getLogger(__name__)
+
+class ProjectLifecycleOrchestrator:
+    """
+    Orchestrates the high-level lifecycle of a Project SAGA.
+    Reacts to project-level events and sends commands to services/nested Sagas.
+    """
+    def __init__(self, db_session_factory: Callable[[], AsyncSession], event_bus: EventBus):
+        """
+        Initializes the ProjectLifecycleOrchestrator.
+        Args:
+            db_session_factory: A factory function to get a new AsyncSession.
+            event_bus: The EventBus instance for publishing commands/events.
+        """
+        self.db_session_factory = db_session_factory
+        self.event_bus = event_bus
+        self.saga_processor = SagaProcessor(event_bus=event_bus) # Initialize SagaProcessor
+        
+        self.event_handlers: Dict[str, Callable[[Any], Any]] = { # Type hint for handler arg changed to Any
+            "ProjectCreatedEvent": self.on_project_created,
+            "DeliverableDeliveredEvent": self.on_deliverable_delivered,
+            "DeliverableFailedEvent": self.on_deliverable_failed,
+            # Add handlers for other events as you define them
+        }
+        
+    async def on_project_created(self, event: ProjectCreatedEvent):
+        """
+        Handles the ProjectCreatedEvent to initiate the Project Lifecycle SAGA.
+        This is the entry point for the Project SAGA orchestration.
+        """
+        logger.info(f"ProjectLifecycleOrchestrator: Received ProjectCreatedEvent for Project ID: {event.project_id}")
+
+        async with self.db_session_factory() as session:
+            # Use SagaProcessor to get or create the SAGA state
+            saga_state = await self.saga_processor.get_or_create_saga_state(
+                session=session,
+                project_id=event.project_id,
+                saga_type=SagaType.PROJECT_LIFECYCLE,
+                initial_state=ProjectSagaState.PROJECT_CREATED.value,
+                saga_id=event.project_id # Using project_id as saga_id for main project SAGA
+            )
+            
+            # Idempotency check handled by saga_processor.update_saga_state,
+            # but a quick check here if already processed, to avoid unnecessary work.
+            if saga_state.last_event_processed_id == str(event.event_id) and \
+               saga_state.current_state == ProjectSagaState.INFO_GATHERING_INITIATED.value: # Check target state too
+                logger.warning(f"ProjectLifecycleOrchestrator: ProjectCreatedEvent {event.event_id} already processed to {ProjectSagaState.INFO_GATHERING_INITIATED.value} for Project {event.project_id}. Idempotent.")
+                return
+
+            # 2. Transition SAGA State and Send Next Command
+            next_state = ProjectSagaState.INFO_GATHERING_INITIATED
+            
+            # This command (StartInformationGatheringCommand) will be consumed by the Information Gathering Service
+            command = StartInformationGatheringCommand(
+                project_id=event.project_id,
+                deliverable_ids=[] # Placeholder, will be populated once deliverables are in DB
+            )
+            
+            await self.saga_processor.publish_message(
+                topic="project.command.start_info_gathering", # Define this topic in your config/event_bus.py if needed
+                message_payload=command
+            )
+            
+            # 3. Update SAGA state using SagaProcessor
+            await self.saga_processor.update_saga_state(
+                session=session,
+                saga_state=saga_state,
+                new_state_enum=next_state,
+                event_id=event.event_id,
+                command_id=command.command_id
+            )
+            logger.info(f"Project SAGA for {event.project_id} transitioned to {next_state.value} and sent StartInformationGatheringCommand.")
+
+
+    async def on_deliverable_delivered(self, event: DeliverableDeliveredEvent):
+        """
+        Handles DeliverableDeliveredEvent, indicating a deliverable SAGA has completed.
+        """
+        logger.info(f"ProjectLifecycleOrchestrator: Received DeliverableDeliveredEvent for Project {event.project_id}, Deliverable {event.deliverable_id}")
+
+        async with self.db_session_factory() as session:
+            saga_state = await self.saga_processor.get_or_create_saga_state( # Use get_or_create for robustness
+                session=session,
+                project_id=event.project_id,
+                saga_type=SagaType.PROJECT_LIFECYCLE,
+                initial_state=ProjectSagaState.COORDINATING_DELIVERABLES.value, # Initial state if this event creates the saga
+                saga_id=event.project_id # Using project_id as saga_id for main project SAGA
+            )
+            
+            if saga_state.last_event_processed_id == str(event.event_id):
+                logger.warning(f"ProjectLifecycleOrchestrator: DeliverableDeliveredEvent {event.event_id} already processed for Project {event.project_id}. Idempotent.")
+                return
+
+            # In a real scenario, you'd check how many deliverables are complete for this project
+            # and transition the Project SAGA state based on that.
+            # This example assumes a simple transition for now.
+            next_state = ProjectSagaState.COORDINATING_DELIVERABLES 
+            
+            # Here, you'd typically query the DB to see if ALL deliverables are done
+            # from src.models.deliverable import Deliverable
+            # total_deliverables_count = await session.execute(select(func.count(Deliverable.id)).filter_by(project_id=event.project_id))
+            # completed_deliverables_count = await session.execute(
+            #     select(func.count(Deliverable.id)).filter(
+            #         Deliverable.project_id == event.project_id,
+            #         Deliverable.status == DELIVERABLE_STATUS.DELIVERED # Needs DeliverableStatus Enum
+            #     )
+            # )
+            # if completed_deliverables_count.scalar_one() == total_deliverables_count.scalar_one():
+            #    next_state = ProjectSagaState.ALL_DELIVERABLES_DELIVERED
+            #    # Send ProjectCompletedEvent here:
+            #    # command = ProjectCompletedEvent(...)
+            #    # await self.saga_processor.publish_message(topic="project.completed", message_payload=command)
+
+
+            await self.saga_processor.update_saga_state(
+                session=session,
+                saga_state=saga_state,
+                new_state_enum=next_state,
+                event_id=event.event_id
+            )
+            logger.info(f"Project SAGA for {event.project_id} transitioned to {next_state.value} upon Deliverable Delivered.")
+
+    async def on_deliverable_failed(self, event: DeliverableFailedEvent):
+        """
+        Handles DeliverableFailedEvent, indicating a deliverable SAGA has failed.
+        """
+        logger.warning(f"ProjectLifecycleOrchestrator: Received DeliverableFailedEvent for Project {event.project_id}, Deliverable {event.deliverable_id}. Reason: {event.reason}")
+        
+        async with self.db_session_factory() as session:
+            saga_state = await self.saga_processor.get_or_create_saga_state( # Use get_or_create
+                session=session,
+                project_id=event.project_id,
+                saga_type=SagaType.PROJECT_LIFECYCLE,
+                initial_state=ProjectSagaState.PROJECT_FAILED.value, # Initial state if this event creates the saga
+                saga_id=event.project_id # Using project_id as saga_id for main project SAGA
+            )
+            
+            if saga_state.last_event_processed_id == str(event.event_id):
+                logger.warning(f"ProjectLifecycleOrchestrator: DeliverableFailedEvent {event.event_id} already processed for Project {event.project_id}. Idempotent.")
+                return
+
+            # Example compensation: Mark overall SAGA as failed
+            await self.saga_processor.update_saga_state(
+                session=session,
+                saga_state=saga_state,
+                new_state_enum=ProjectSagaState.PROJECT_FAILED,
+                event_id=event.event_id,
+                new_saga_status=SagaStatus.FAILED # Mark the saga as FAILED
+            )
+            logger.info(f"Project SAGA for {event.project_id} transitioned to {ProjectSagaState.PROJECT_FAILED.value} due to Deliverable Failure.")
+            
+            # Here, you would typically send a command to notify a PM:
+            # from src.commands.project_commands import NotifyProjectManagerCommand
+            # command = NotifyProjectManagerCommand(project_id=event.project_id, message=f"Deliverable {event.deliverable_name} failed. Reason: {event.reason}")
+            # await self.saga_processor.publish_message(topic="notification.command.pm", message_payload=command)
+
+
+    # You can add a generic handler for all events if you want a centralized dispatch
+    async def handle_event(self, event_data: Dict[str, Any]):
+        """
+        Generic event handler to dispatch to specific methods.
+        This will be called by your listener.
+        """
+        event_type = event_data.get("event_type")
+        if not event_type:
+            logger.error(f"Received event with no 'event_type': {event_data}")
+            return
+        
+        # This part assumes event dataclasses have been correctly defined in events/
+        # and their names match their event_type string.
+        # It's more robust to have a central event deserializer.
+        from src.events import project_events # Import the module containing your event dataclasses
+        event_cls = getattr(project_events, event_type, None) # Get class from module by name
+        
+        if not event_cls:
+            logger.warning(f"No specific event class found for event_type: {event_type}. Processing as generic dict.")
+            event_obj = event_data # Process as a generic dict
+        else:
+            try:
+                event_obj = event_cls(**event_data) # Attempt to instantiate dataclass
+            except Exception as e:
+                logger.error(f"Failed to deserialize event {event_type}: {e}. Data: {event_data}")
+                return
+
+        handler = self.event_handlers.get(event_type)
+        if handler:
+            try:
+                await handler(event_obj)
+            except Exception as e:
+                logger.error(f"Error handling event {event_type} for Project {event_obj.project_id}: {e}", exc_info=True)
+                # Here, you might publish a SagaFailedEvent or handle retry logic
+        else:
+            logger.warning(f"No handler registered for event type: {event_type}")

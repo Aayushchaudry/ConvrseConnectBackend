@@ -1,54 +1,57 @@
-# src/config/database.py (SIMPLIFIED & CORRECTED)
+# src/config/database.py (FINAL UPDATE for Phase 5 Models)
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import declarative_base, sessionmaker
 from src.config.settings import settings
 
 # Base class for declarative models
-# All your ORM models should inherit from this Base
 Base = declarative_base()
 
 # Create an async SQLAlchemy engine
-# This engine is the primary interface to your database connection.
 engine = create_async_engine(
-    settings.DATABASE_URL, # Ensure this is 'postgresql+asyncpg://'
-    echo=settings.DEBUG,   # Logs SQL statements if True (useful for debugging)
-    pool_pre_ping=True     # Ensures connections in the pool are healthy
+    settings.DATABASE_URL,
+    echo=settings.DEBUG, # Set to True to log all SQL statements for debugging
+    pool_pre_ping=True # Ensures connections are healthy
 )
 
 # Async sessionmaker for database operations
-# This is what your services and orchestrators will use to get a database session.
-AsyncSessionLocal = async_sessionmaker(
-    autocommit=False,       # Don't auto-commit transactions
-    autoflush=False,        # Don't autoflush (write changes) automatically
-    bind=engine,            # Bind this sessionmaker to our async engine
-    class_=AsyncSession,    # Use the async session class
-    expire_on_commit=False  # Prevents ORM objects from expiring after commit (can simplify certain patterns)
+AsyncSessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False # Prevents objects from expiring after commit
 )
 
 async def get_db_session():
-    """
-    Dependency function for FastAPI routes to get an asynchronous database session.
-    It yields a session, ensuring it's properly closed after the request.
-    """
+    """Dependency for FastAPI routes to get a database session."""
     async with AsyncSessionLocal() as session:
         yield session
 
 async def init_db():
     """
-    Initializes the database schema.
-    Creates all tables defined in your models if they don't already exist.
-    
-    IMPORTANT: Import all models here (inside the function) to avoid circular imports.
+    Initializes the database: creates tables for all models if they don't exist.
+    Models MUST be imported here so SQLAlchemy knows about them.
     """
-    # Import models here to avoid circular imports
+    # --- IMPORT ALL YOUR ORM MODELS HERE ---
+    # This is crucial so SQLAlchemy's Base.metadata.create_all() knows about them.
+    # Keep these imports INSIDE init_db to avoid circular imports at module level
+    # if models also import Base from this file.
+
     from src.models.project import Project, ProjectStatus
-    from src.models.saga_state import SagaState, SagaStatus, SagaType
-    # Add more model imports as you create them
-    
+    from src.models.saga_state import SagaState, SagaStatus, SagaType 
+    from src.models.deliverable import Deliverable, DeliverableStatus, DeliverableType 
+    from src.models.requirement import Requirement, RequirementStatus, RequirementType 
+    from src.models.requirement_file import RequirementFile 
+    from src.models.internal_task import InternalTask, TaskStatus, TaskType, Priority 
+    from src.models.review_item import ReviewItem, ReviewItemType, ReviewStatus 
+    from src.models.client_feedback import ClientFeedback, FeedbackType 
+    from src.models.project_output import ProjectOutput 
+
+
     async with engine.begin() as conn:
         print("Initializing database...")
-        # This command creates tables for all ORM models that inherit from `Base`
-        # and have been imported into this function.
+        # This will create tables for all models inherited from Base
+        # that have been imported within this function.
         await conn.run_sync(Base.metadata.create_all)
         print("Database initialization complete.")

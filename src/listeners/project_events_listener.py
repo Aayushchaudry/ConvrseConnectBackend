@@ -1,13 +1,87 @@
-"""
-Project Events Listener.
-Listens for project-level events and triggers appropriate actions.
-"""
+# src/listeners/project_events_listener.py
 
-# TODO: Import event bus libraries and project-related services
-# TODO: Define ProjectEventsListener class
-# TODO: Implement handlers for project lifecycle events
-# TODO: Handle project status change events
-# TODO: Process project milestone events
-# TODO: Manage project notification triggers
-# TODO: Implement error handling and retry logic
-# TODO: Add logging and monitoring for event processing 
+import asyncio
+import logging
+from typing import Callable, Any, Dict
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.config.settings import settings
+from src.config.database import AsyncSessionLocal # Import AsyncSessionLocal for DB sessions
+from src.events.event_bus_interface import EventBus
+from src.orchestrators.project_lifecycle_orchestrator.project_lifecycle_orchestrator import ProjectLifecycleOrchestrator
+
+logger = logging.getLogger(__name__)
+
+# Define the Kafka topic(s) this listener will subscribe to
+# This should match where project-level events are published (e.g., "project.created")
+PROJECT_EVENTS_TOPIC = "project.created" # Topic where ProjectCreatedEvent is published
+DELIVERABLE_REPORT_TOPICS = ["deliverable.delivered", "deliverable.failed"] # Topics from colleague's Deliverable SAGA
+
+async def start_listening(event_bus: EventBus):
+    """
+    Starts the Project Events Listener, consuming messages from the Event Bus
+    and dispatching them to the ProjectLifecycleOrchestrator.
+    """
+    logger.info(f"Project Events Listener starting for topic(s): {PROJECT_EVENTS_TOPIC} and {DELIVERABLE_REPORT_TOPICS}")
+
+    # Create an instance of the ProjectLifecycleOrchestrator
+    # It needs a factory for DB sessions and the event_bus itself.
+    project_orchestrator = ProjectLifecycleOrchestrator(
+        db_session_factory=AsyncSessionLocal, # Pass the sessionmaker factory
+        event_bus=event_bus
+    )
+
+    # Get a consumer for the project creation topic
+    project_created_consumer = event_bus.get_consumer(
+        topic=PROJECT_EVENTS_TOPIC,
+        group_id=settings.KAFKA_CONSUMER_GROUP_ID + "-project-creator"
+    )
+
+    # Get a consumer for deliverable report topics (if different group is desired)
+    deliverable_report_consumer = event_bus.get_consumer(
+        topic=DELIVERABLE_REPORT_TOPICS[0], # Start with first topic for now
+        group_id=settings.KAFKA_CONSUMER_GROUP_ID + "-deliverable-reporter"
+    )
+
+    # Start the consumers
+    await project_created_consumer.start()
+    logger.info(f"Started consumer for topic: {PROJECT_EVENTS_TOPIC}")
+    
+    await deliverable_report_consumer.start()
+    logger.info(f"Started consumer for topic: {DELIVERABLE_REPORT_TOPICS[0]}")
+
+    # Start separate async tasks for each consumer loop
+    # Using 'asyncio.create_task' ensures these run in the background
+    # We pass the orchestrator's handle_event method as the handler.
+    project_created_task = asyncio.create_task(
+        _listen_loop(project_created_consumer, project_orchestrator.handle_event)
+    )
+    deliverable_report_task = asyncio.create_task(
+        _listen_loop(deliverable_report_consumer, project_orchestrator.handle_event)
+    )
+
+    # Keep these tasks running indefinitely or until cancelled
+    await asyncio.gather(project_created_task, deliverable_report_task)
+
+
+async def _listen_loop(consumer: Any, handler: Callable[[Dict[str, Any]], Any]):
+    """
+    Generic loop to consume messages from a given consumer and call a handler.
+    """
+    try:
+        # Use async iteration for AIOKafkaConsumer
+        async for message in consumer:
+            logger.info(f"Listener received message from Topic='{message.topic}', Offset={message.offset}")
+            try:
+                # The handler expects the deserialized message value (dict)
+                await handler(message.value)
+            except Exception as e:
+                logger.error(f"Error processing message in listener handler: {e}", exc_info=True)
+                # In a production system, you might implement dead-letter queues here.
+    except asyncio.CancelledError:
+        logger.info("Listener loop cancelled.")
+    except Exception as e:
+        logger.error(f"Listener loop crashed: {e}", exc_info=True)
+    finally:
+        await consumer.stop()
+        logger.info("Listener consumer closed.")

@@ -150,7 +150,8 @@ class KafkaEventBus(EventBus):
             bootstrap_servers=self.bootstrap_servers,
             group_id=group_id,
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            client_id=f"{settings.KAFKA_CLIENT_ID}-{group_id}"
+            client_id=f"{settings.KAFKA_CLIENT_ID}-{group_id}",
+            auto_offset_reset='earliest'  # Start from beginning for new consumer groups
         )
         self.consumers[consumer_key] = consumer
         return consumer

@@ -1,9 +1,10 @@
 # src/commands/project_commands.py
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # --- Base Command Definition (Optional but good practice) ---
 # All your commands can inherit from this to ensure common fields like command_id, timestamp.
@@ -32,8 +33,32 @@ class StartInformationGatheringCommand(BaseCommand):
     project_id: UUID
     deliverable_ids: List[UUID] # List of deliverables to gather info for
 
-    def __init__(self, project_id: UUID, deliverable_ids: List[UUID]):
-        super().__init__(command_id=uuid.uuid4(), timestamp=datetime.utcnow(), command_type="StartInformationGatheringCommand")
+    def __init__(self, project_id: UUID, deliverable_ids: List[UUID], 
+                 command_id: UUID = None, timestamp: datetime = None, command_type: str = None):
+        # Handle both creation and deserialization scenarios
+        if command_id is None:
+            command_id = uuid.uuid4()
+        elif isinstance(command_id, str):
+            command_id = UUID(command_id)
+            
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+        elif isinstance(timestamp, str):
+            # Parse ISO format timestamp from Kafka
+            timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            
+        if command_type is None:
+            command_type = "StartInformationGatheringCommand"
+            
+        # Convert project_id to UUID if it's a string
+        if isinstance(project_id, str):
+            project_id = UUID(project_id)
+            
+        # Convert deliverable_ids to UUIDs if they're strings
+        if deliverable_ids and isinstance(deliverable_ids[0], str):
+            deliverable_ids = [UUID(did) for did in deliverable_ids]
+            
+        super().__init__(command_id=command_id, timestamp=timestamp, command_type=command_type)
         self.project_id = project_id
         self.deliverable_ids = deliverable_ids
 
