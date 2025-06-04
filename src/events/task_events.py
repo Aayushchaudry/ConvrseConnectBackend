@@ -99,14 +99,37 @@ class InternalTaskFailedEvent(BaseEvent):
     """
     project_id: UUID
     deliverable_id: UUID
-    task_id: UUID
+    task_id: Optional[UUID]  # Task ID can be None if task creation failed
     task_name: str
     task_type: str
     reason: str
     error_details: Optional[Dict[str, Any]] = None
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, task_id: UUID, task_name: str, task_type: str, reason: str, error_details: Optional[Dict[str, Any]] = None):
-        super().__init__(event_id=uuid.uuid4(), timestamp=datetime.utcnow(), event_type="InternalTaskFailedEvent")
+    def __init__(self, project_id: UUID, deliverable_id: UUID, task_id: Optional[UUID], task_name: str, task_type: str, reason: str, error_details: Optional[Dict[str, Any]] = None, event_id: UUID = None, timestamp: datetime = None, event_type: str = None):
+        # Allow event_id and timestamp to be passed for deserialization
+        if event_id is None:
+            event_id = uuid.uuid4()
+        elif isinstance(event_id, str):
+            event_id = UUID(event_id)
+            
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+        elif isinstance(timestamp, str):
+            # Parse ISO format timestamp from Kafka
+            timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            
+        if event_type is None:
+            event_type = "InternalTaskFailedEvent"
+            
+        # Convert UUIDs from strings if needed
+        if isinstance(project_id, str):
+            project_id = UUID(project_id)
+        if isinstance(deliverable_id, str):
+            deliverable_id = UUID(deliverable_id)
+        if isinstance(task_id, str) and task_id is not None:
+            task_id = UUID(task_id)
+            
+        super().__init__(event_id=event_id, timestamp=timestamp, event_type=event_type)
         self.project_id = project_id
         self.deliverable_id = deliverable_id
         self.task_id = task_id

@@ -55,7 +55,8 @@ class ReviewItemResponse(BaseModel):
 
 # --- API Endpoints ---
 
-@router.post("/review_items/{review_item_id}/feedback/", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/review_items/{review_item_id}/feedback", include_in_schema=True)
+@router.post("/review_items/{review_item_id}/feedback/", include_in_schema=False)
 async def submit_feedback_on_review_item(
     review_item_id: UUID,
     feedback_data: SubmitFeedbackRequest,
