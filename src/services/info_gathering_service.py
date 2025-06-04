@@ -217,13 +217,33 @@ class InformationGatheringService:
                         logger.info(f"InformationGatheringService: Successfully created requirements for Deliverable {deliverable.id}.")
 
                         # Publish event indicating info gathering is complete for this deliverable
-                        await self.event_bus.publish(
-                            topic="deliverable.info_gathered", # Define this topic
-                            message=DeliverableInfoGatheredEvent(
+                        try:
+                            event = DeliverableInfoGatheredEvent(
                                 project_id=project.id,
                                 deliverable_id=deliverable.id
-                            ).__dict__
-                        )
+                            )
+                            
+                            # Create message dictionary manually to ensure proper serialization
+                            message_dict = {
+                                'event_id': str(event.event_id),
+                                'timestamp': event.timestamp.isoformat(),
+                                'event_type': event.event_type,
+                                'project_id': str(event.project_id),
+                                'deliverable_id': str(event.deliverable_id)
+                            }
+                            
+                            logger.info(f"About to publish DeliverableInfoGatheredEvent for deliverable {deliverable.id}")
+                            logger.debug(f"Event message: {message_dict}")
+                            
+                            await self.event_bus.publish(
+                                topic="deliverable.info_gathered",
+                                message=message_dict
+                            )
+                            
+                            logger.info(f"✅ Successfully published DeliverableInfoGatheredEvent for deliverable {deliverable.id}")
+                            
+                        except Exception as event_error:
+                            logger.error(f"❌ FAILED to publish DeliverableInfoGatheredEvent for deliverable {deliverable.id}: {event_error}", exc_info=True)
 
                     except Exception as e:
                         logger.error(f"Error creating requirements for Deliverable {deliverable.id}: {e}", exc_info=True)

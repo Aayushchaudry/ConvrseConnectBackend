@@ -6,6 +6,7 @@ from src.models.deliverable import Deliverable, DeliverableType, DeliverableStat
 from src.models.project import Project # Import Project model for validation/relationship
 from src.config.database import AsyncSessionLocal # For session factory
 from src.events.event_bus_interface import EventBus # For future event publishing
+from src.commands.project_commands import StartInformationGatheringCommand  # Move import to top
 from uuid import UUID
 from typing import Optional, List
 
@@ -25,6 +26,7 @@ class DeliverableService:
         """
         self.db_session = db_session
         self.event_bus = event_bus
+        logger.info(f"DeliverableService initialized with event_bus: {type(event_bus)}")
 
     async def create_deliverable(
         self,
@@ -47,6 +49,8 @@ class DeliverableService:
         Raises:
             ValueError: If the project_id does not exist.
         """
+        logger.info(f"🔄 Creating deliverable for project {project_id}, type: {deliverable_type}")
+        
         # 1. Basic validation: Ensure project exists
         from sqlalchemy import select
         project = await self.db_session.execute(
@@ -70,14 +74,35 @@ class DeliverableService:
         await self.db_session.commit() # Commit changes to DB
         await self.db_session.refresh(new_deliverable) # Refresh to get ID and other auto-generated fields
 
-        logger.info(f"Deliverable created: ID={new_deliverable.id}, Type={new_deliverable.deliverable_type.value}, Project={new_deliverable.project_id}")
+        logger.info(f"✅ Deliverable created: ID={new_deliverable.id}, Type={new_deliverable.deliverable_type.value}, Project={new_deliverable.project_id}")
 
-        # In a SAGA, events like DeliverableCreatedEvent might be published here
-        # IF there's a listener directly interested in individual deliverable creations.
-        # However, our SAGA initiates Deliverable Sagas from a COMMAND
-        # (StartDeliverableSagaCommand) which is sent by Project Orchestrator.
-        # So, no direct event publishing from this service for SAGA initiation here.
-        
+        # 4. Trigger information gathering for this deliverable
+        logger.info(f"🔄 Starting event publishing for deliverable {new_deliverable.id}")
+        try:
+            # Create command to trigger information gathering for this specific deliverable
+            command = StartInformationGatheringCommand(
+                project_id=project_id,
+                deliverable_ids=[new_deliverable.id]
+            )
+            
+            logger.info(f"📝 Command created: {command.__dict__}")
+            logger.info(f"🌐 Event bus instance: {self.event_bus}")
+            logger.info(f"🌐 Event bus type: {type(self.event_bus)}")
+            
+            logger.info(f"📤 Publishing StartInformationGatheringCommand for deliverable {new_deliverable.id}")
+            await self.event_bus.publish(
+                topic="project.command.start_info_gathering",
+                message=command.__dict__
+            )
+            logger.info(f"✅ StartInformationGatheringCommand published successfully for deliverable {new_deliverable.id}")
+            
+        except ImportError as ie:
+            logger.error(f"❌ IMPORT ERROR in deliverable service: {ie}", exc_info=True)
+        except AttributeError as ae:
+            logger.error(f"❌ ATTRIBUTE ERROR in deliverable service: {ae}", exc_info=True)
+        except Exception as e:
+            logger.error(f"❌ GENERAL ERROR in deliverable service: {e}", exc_info=True)
+            
         return new_deliverable
 
     async def get_deliverable_by_id(self, deliverable_id: UUID) -> Optional[Deliverable]:

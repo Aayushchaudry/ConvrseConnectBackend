@@ -135,18 +135,25 @@ class KafkaEventBus(EventBus):
         logger.info(f"Topic creation requested for '{topic_name}' (handled by Kafka auto-creation)")
         pass
     
-    def get_consumer(self, topic: str, group_id: str):
+    def get_consumer(self, topic, group_id: str):
         """
         Returns a consumer instance for direct iteration (for background listeners).
-        This method might vary significantly between implementations.
+        topic can be either a string or a list of strings.
         """
-        consumer_key = f"{topic}-{group_id}"
+        # Handle both single topic (string) and multiple topics (list)
+        if isinstance(topic, str):
+            topics = [topic]
+            consumer_key = f"{topic}-{group_id}"
+        else:
+            topics = topic  # It's already a list
+            consumer_key = f"{'-'.join(sorted(topics))}-{group_id}"
+        
         if consumer_key in self.consumers:
             return self.consumers[consumer_key]
         
         # Create a new consumer for background listening
         consumer = AIOKafkaConsumer(
-            topic,
+            *topics,  # Unpack the topics list
             bootstrap_servers=self.bootstrap_servers,
             group_id=group_id,
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
