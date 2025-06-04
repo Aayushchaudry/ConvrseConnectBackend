@@ -1,3 +1,0 @@
-"""
-Authentication API endpoints package.
-""" 

@@ -1,4 +1,4 @@
-# src/main.py (UPDATED)
+# src/main.py (UPDATED WITH AUTH INTEGRATION)
 
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
@@ -10,15 +10,20 @@ from src.config.settings import settings
 from src.config.database import init_db
 from src.config.event_bus import get_event_bus, close_event_bus
 
+# --- AUTH INTEGRATION IMPORTS ---
+from src.middleware.auth_middleware import AuthenticationMiddleware
+from src.integrations.auth_service_client import get_auth_client, close_auth_client
+
 # --- IMPORT YOUR API ROUTERS ---
 from src.api.projects.controllers import router as projects_router
 from src.api.deliverables.controllers import router as deliverables_router
+from src.api.integration.auth_endpoints import router as integration_router
 
 # --- IMPORT YOUR LISTENERS ---
 from src.listeners.project_events_listener import start_listening as start_project_events_listener
 from src.listeners.info_gathering_listener import start_listening as start_info_gathering_listener
 from src.listeners.deliverable_events_listener import start_listening as start_deliverable_events_listener
-from src.listeners.production_management_listener import start_listening as start_production_management_listener # <--- NEW IMPORT
+from src.listeners.production_management_listener import start_listening as start_production_management_listener
 
 
 logging.basicConfig(level=logging.INFO)
@@ -41,12 +46,26 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize database: {e}")
         raise
 
-    # 2. Initialize Event Bus
+    # 2. Initialize Auth Service Client
+    try:
+        auth_client = await get_auth_client()
+        # Test auth service connectivity
+        health_status = await auth_client.health_check()
+        if health_status:
+            logger.info("Auth service connection established successfully.")
+        else:
+            logger.warning("Auth service health check failed - service may be unavailable")
+    except Exception as e:
+        logger.error(f"Failed to initialize auth service client: {e}")
+        # Don't fail startup - allow graceful degradation
+        logger.warning("Continuing startup without auth service - some features may be limited")
+
+    # 3. Initialize Event Bus
     try:
         event_bus = await get_event_bus()
         logger.info("Event Bus initialized and connected successfully.")
 
-        # 3. Start SAGA Listeners
+        # 4. Start SAGA Listeners
         # Project Events Listener
         project_listener_task = asyncio.create_task(start_project_events_listener(event_bus))
         background_tasks.append(project_listener_task)
@@ -62,7 +81,7 @@ async def lifespan(app: FastAPI):
         background_tasks.append(deliverable_events_listener_task)
         logger.info("Deliverable Events Listener started in background.")
 
-        # Production Management Listener # <--- NEW LISTENER STARTUP
+        # Production Management Listener
         production_management_listener_task = asyncio.create_task(start_production_management_listener(event_bus))
         background_tasks.append(production_management_listener_task)
         logger.info("Production Management Listener started in background.")
@@ -75,6 +94,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown events
     logger.info("Application shutting down...")
+    
+    # Cancel background tasks
     for task in background_tasks:
         task.cancel() # Request tasks to cancel
         try:
@@ -82,7 +103,9 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass # Task was cancelled as expected
 
+    # Close connections
     await close_event_bus() # Close the active event bus connection
+    await close_auth_client() # Close auth service client
     logger.info("Application shutdown complete.")
 
 
@@ -93,11 +116,38 @@ app = FastAPI(
     lifespan=lifespan # Attach the lifespan context manager
 )
 
+# Add authentication middleware
+app.add_middleware(
+    AuthenticationMiddleware,
+    exclude_paths=[
+        "/health",
+        "/docs", 
+        "/redoc",
+        "/openapi.json",
+        "/api/v1/health",
+        "/api/v1/integration/health"
+    ]
+)
+
 # Include your API routers here
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(deliverables_router, prefix="/api/v1")
+app.include_router(integration_router, prefix="/api/v1")
 
 @app.get("/api/v1/health")
 async def health_check():
-    """Basic health check endpoint."""
-    return {"status": "ok", "app_name": settings.APP_NAME, "environment": settings.ENV}
+    """Extended health check endpoint with auth service status."""
+    try:
+        # Check auth service health
+        auth_client = await get_auth_client()
+        auth_service_healthy = await auth_client.health_check()
+    except Exception as e:
+        logger.warning(f"Auth service health check failed: {e}")
+        auth_service_healthy = False
+    
+    return {
+        "status": "ok", 
+        "app_name": settings.APP_NAME, 
+        "environment": settings.ENV,
+        "auth_service_healthy": auth_service_healthy
+    }

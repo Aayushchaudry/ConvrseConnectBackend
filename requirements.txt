@@ -20,6 +20,14 @@ pyjwt>=2.8.0
 passlib[bcrypt]>=1.7.4
 python-jose[cryptography]>=3.3.0
 
+# HTTP Clients for auth-service communication
+httpx>=0.25.2
+aiohttp>=3.9.0
+
+# Caching for token management
+redis>=5.0.1
+aioredis>=2.0.1
+
 # Utilities
 python-dotenv>=1.0.0  # Environment variables
 requests>=2.31.0

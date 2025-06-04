@@ -64,6 +64,11 @@ class Deliverable(Base):
     # Tentative timeline in days for this deliverable
     tentative_timeline_days = Column(Integer, nullable=True)
 
+    # --- AUTH INTEGRATION FIELDS ---
+    # User context - who is assigned to and who created this deliverable
+    assigned_to = Column(Integer, nullable=True, index=True) # Foreign key to users table in auth-service
+    created_by = Column(Integer, nullable=False, index=True) # Foreign key to users table in auth-service
+
     # Automatic timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
@@ -82,4 +87,4 @@ class Deliverable(Base):
     def __repr__(self):
         """String representation for debugging."""
         return (f"<Deliverable(id='{self.id}', project_id='{self.project_id}', "
-                f"type='{self.deliverable_type.value}', status='{self.current_status.value}')>")
+                f"type='{self.deliverable_type.value}', status='{self.current_status.value}', assigned_to='{self.assigned_to}')>")

@@ -2,7 +2,7 @@
 
 import enum
 import uuid
-from sqlalchemy import Column, String, DateTime, func, DECIMAL, Enum
+from sqlalchemy import Column, String, DateTime, func, DECIMAL, Enum, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship # Used for defining relationships between models
 from src.config.database import Base # Import Base from your database config
@@ -40,6 +40,14 @@ class Project(Base):
     start_date = Column(DateTime, nullable=True)
     end_date = Column(DateTime, nullable=True) # Overall project deadline (renamed from due_date)
 
+    # --- AUTH INTEGRATION FIELDS ---
+    # Business context - links project to a business from auth-service
+    business_id = Column(Integer, nullable=False, index=True) # Foreign key to businesses table in auth-service
+    
+    # User context - who created and is assigned to this project
+    created_by = Column(Integer, nullable=False, index=True) # Foreign key to users table in auth-service
+    assigned_to = Column(Integer, nullable=True, index=True) # Foreign key to users table in auth-service (optional)
+
     # Automatic timestamps for auditing
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
@@ -53,4 +61,4 @@ class Project(Base):
 
     def __repr__(self):
         """String representation for debugging."""
-        return f"<Project(id='{self.id}', name='{self.name}', status='{self.status.value}')>"
+        return f"<Project(id='{self.id}', name='{self.name}', status='{self.status.value}', business_id='{self.business_id}')>"
