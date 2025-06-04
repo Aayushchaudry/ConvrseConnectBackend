@@ -6,6 +6,7 @@ from typing import Callable, Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from datetime import datetime
+import traceback
 
 from src.config.settings import settings
 from src.config.database import AsyncSessionLocal # For getting session factory
@@ -48,11 +49,12 @@ async def start_listening(event_bus: EventBus):
         event_bus=event_bus
     )
 
-    # Get a consumer for the production command topics - start with the first topic
+    # Get a consumer for the production command topics
     consumer = event_bus.get_consumer(
-        topic=PRODUCTION_COMMAND_TOPICS[0],  # Start with the first topic for now
+        topic=PRODUCTION_COMMAND_TOPICS,  # Subscribe to all topics
         group_id=settings.KAFKA_CONSUMER_GROUP_ID + "-production-manager" # A distinct consumer group ID
     )
+    logger.info(f"Production Management Listener subscribed to topics: {PRODUCTION_COMMAND_TOPICS}")
 
     # Start the consumer - this was missing!
     await consumer.start()
@@ -74,74 +76,30 @@ async def _listen_loop(consumer: Any, service_instance: ProductionManagementServ
     try:
         # Use async iteration for AIOKafkaConsumer - this was the main issue!
         async for message in consumer:
-            logger.info(f"Prod Management Listener received command: Topic='{message.topic}', Offset={message.offset}, Type='{message.value.get('command_type')}'")
-            try:
-                command_data = message.value
-                command_type = command_data.get("command_type")
+            logger.info(f"Received message on topic: {message.topic}")
+            logger.info(f"Message value: {message.value}")
+            
+            if message.topic == "deliverable.command.initiate_modeling":
+                logger.info("Processing initiate_modeling command")
+                command = InitiateModelingCommand(**message.value)
+                await service_instance.handle_initiate_modeling_command(command)
+                logger.info(f"Created modeling task for deliverable {command.deliverable_id}")
+            elif message.topic == "deliverable.command.create_rework_task":
+                logger.info("Processing create_rework_task command")
+                command = CreateReworkTaskCommand(**message.value)
+                await service_instance.handle_create_rework_task_command(command)
+                logger.info(f"Created rework task for original task {command.original_task_id}")
+            elif message.topic == "production.command.update_internal_task_status":
+                logger.info("Processing update_internal_task_status command")
+                command = UpdateInternalTaskStatusCommand(**message.value)
+                await service_instance.handle_update_internal_task_status_command(command)
+                logger.info(f"Updated internal task {command.task_id} status to {command.new_status}")
 
-                # Dynamically dispatch command to the correct handler method
-                # This requires careful mapping of command_type to method names
-                handler_method = None
-                command_obj = None
-
-                # Import command dataclasses dynamically to reconstruct the object
-                from src.orchestrators.deliverable_saga_orchestrator import commands as deliverable_saga_commands
-                from src.commands import production_commands as central_production_commands
-
-                if command_type == "InitiateModelingCommand":
-                    # Convert string UUIDs and timestamp back to proper types
-                    command_data_converted = {
-                        "project_id": UUID(command_data["project_id"]),
-                        "deliverable_id": UUID(command_data["deliverable_id"]),
-                        "command_id": UUID(command_data["command_id"]),
-                        "timestamp": datetime.fromisoformat(command_data["timestamp"]),
-                        "command_type": command_data["command_type"]
-                    }
-                    command_obj = deliverable_saga_commands.InitiateModelingCommand(**command_data_converted)
-                    handler_method = service_instance.handle_initiate_modeling_command
-                elif command_type == "InitiateTexturingCommand":
-                    command_data_converted = {
-                        "project_id": UUID(command_data["project_id"]),
-                        "deliverable_id": UUID(command_data["deliverable_id"]),
-                        "command_id": UUID(command_data["command_id"]),
-                        "timestamp": datetime.fromisoformat(command_data["timestamp"]),
-                        "command_type": command_data["command_type"]
-                    }
-                    command_obj = deliverable_saga_commands.InitiateTexturingCommand(**command_data_converted)
-                    handler_method = service_instance.handle_initiate_texturing_command # You'll add this to service
-                elif command_type == "InitiateRenderingCommand":
-                    command_data_converted = {
-                        "project_id": UUID(command_data["project_id"]),
-                        "deliverable_id": UUID(command_data["deliverable_id"]),
-                        "render_type": command_data["render_type"],
-                        "command_id": UUID(command_data["command_id"]),
-                        "timestamp": datetime.fromisoformat(command_data["timestamp"]),
-                        "command_type": command_data["command_type"]
-                    }
-                    command_obj = deliverable_saga_commands.InitiateRenderingCommand(**command_data_converted)
-                    handler_method = service_instance.handle_initiate_rendering_command # You'll add this to service
-                elif command_type == "CreateInternalTaskCommand":
-                    command_obj = central_production_commands.CreateInternalTaskCommand(**command_data)
-                    handler_method = service_instance.handle_create_internal_task_command # You'll add this to service
-                elif command_type == "UpdateInternalTaskStatusCommand":
-                    command_obj = central_production_commands.UpdateInternalTaskStatusCommand(**command_data)
-                    handler_method = service_instance.handle_update_internal_task_status_command
-                elif command_type == "CreateReworkTaskCommand":
-                    command_obj = central_production_commands.CreateReworkTaskCommand(**command_data)
-                    handler_method = service_instance.handle_create_rework_task_command
-                
-                if handler_method and command_obj:
-                    await handler_method(command_obj)
-                else:
-                    logger.warning(f"No handler or command class found for command type: {command_type}. Data: {command_data}")
-
-            except Exception as e:
-                logger.error(f"Error processing command in production_management_listener handler for {command_type}: {e}", exc_info=True)
-                # Implement dead-letter queues or retry logic here in production.
     except asyncio.CancelledError:
         logger.info("Production Management Listener loop cancelled.")
     except Exception as e:
-        logger.error(f"Production Management Listener loop crashed: {e}", exc_info=True)
+        logger.error(f"Production Management Listener loop crashed: {str(e)}")
+        logger.error(traceback.format_exc())
     finally:
         await consumer.stop()
         logger.info("Production Management Listener consumer closed.")

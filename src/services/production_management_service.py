@@ -152,13 +152,17 @@ class ProductionManagementService:
                     if not original_task:
                         logger.warning(f"Original task {command.original_task_id} not found for rework command. Creating standalone rework task.")
 
+                # Create new task with same type as original task
+                task_type = original_task.task_type if original_task else TaskType.REWORK
+                task_name = f"Rework: {original_task.task_name if original_task else 'General Rework'} - Client Comment"
+
                 new_rework_task = InternalTask(
                     project_id=command.project_id,
                     deliverable_id=command.deliverable_id,
-                    task_name=f"Rework: {original_task.task_name if original_task else 'General Rework'} - Client Comment",
-                    task_type=TaskType.REWORK,
+                    task_name=task_name,
+                    task_type=task_type,  # Use original task type
                     parent_task_id=original_task.id if original_task else None,
-                    source_review_item_id=command.comment_id, # Linking rework to the client comment event ID (or actual ClientFeedback ID later)
+                    source_review_item_id=command.review_item_id,  # Use review_item_id instead of comment_id
                     status=TaskStatus.TODO,
                     priority=Priority.HIGH,
                     start_date=datetime.utcnow(),

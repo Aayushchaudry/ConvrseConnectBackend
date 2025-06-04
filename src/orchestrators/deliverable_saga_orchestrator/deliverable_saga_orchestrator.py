@@ -28,7 +28,7 @@ from src.orchestrators.deliverable_saga_orchestrator.commands import (
 from src.commands.production_commands import CreateReworkTaskCommand, UpdateInternalTaskStatusCommand
 # --- Import Events specific to Deliverable SAGA ---
 from src.events.deliverable_events import DeliverableInfoGatheredEvent, DeliverableInfoGatheringFailedEvent
-from src.events.project_events import DeliverableDeliveredEvent
+from src.events.project_events import DeliverableDeliveredEvent, DeliverableFailedEvent
 from src.events.task_events import InternalTaskCreatedEvent, InternalTaskCompletedEvent, InternalTaskFailedEvent, InternalTaskStatusUpdatedEvent
 from src.events.client_feedback_events import ClientFeedbackSubmittedEvent, ReviewItemApprovedEvent, ReviewItemRejectedEvent
 # --- Import Deliverable SAGA States ---
@@ -217,14 +217,14 @@ class DeliverableSagaOrchestrator:
             logger.info(f"Deliverable SAGA for {event.deliverable_id} transitioned to {DeliverableSagaState.FAILED.value} due to info gathering failure.")
             
             # Notify Project Orchestrator about the failure
-            from src.events.project_events import DeliverableFailedEvent as ProjectDeliverableFailedEvent # Alias to avoid name conflict
             await self.saga_processor.publish_message(
                 topic="project.deliverable.failed", # Define this topic
-                message_payload=ProjectDeliverableFailedEvent(
+                message_payload=DeliverableFailedEvent(
+                    event_id=uuid.uuid4(),
+                    timestamp=datetime.utcnow(),
                     project_id=event.project_id,
                     deliverable_id=event.deliverable_id,
-                    deliverable_name=deliverable.deliverable_type.value if deliverable else "Unknown", # Get deliverable name if available
-                    reason=f"Info gathering failed: {event.reason}"
+                    failure_reason=f"Info gathering failed: {event.reason}"
                 )
             )
 
@@ -329,14 +329,14 @@ class DeliverableSagaOrchestrator:
                 # If retries exhausted or severe error, mark deliverable as FAILED
                 logger.error(f"Deliverable SAGA {event.deliverable_id}: Task '{event.task_name}' failed unrecoverably. Marking deliverable SAGA as FAILED.")
                 # Also notify Project Orchestrator
-                from src.events.project_events import DeliverableFailedEvent as ProjectDeliverableFailedEvent
                 await self.saga_processor.publish_message(
                     topic="project.deliverable.failed",
-                    message_payload=ProjectDeliverableFailedEvent(
+                    message_payload=DeliverableFailedEvent(
+                        event_id=uuid.uuid4(),
+                        timestamp=datetime.utcnow(),
                         project_id=event.project_id,
                         deliverable_id=event.deliverable_id,
-                        deliverable_name=deliverable.deliverable_type.value if deliverable else "Unknown", # Needs deliverable obj from DB
-                        reason=f"Internal task failed: {event.reason}"
+                        failure_reason=f"Internal task failed: {event.reason}"
                     )
                 )
 
@@ -414,26 +414,30 @@ class DeliverableSagaOrchestrator:
 
             elif event.feedback_type == "comment":
                 next_state_enum = DeliverableSagaState.REVISIONS_IN_PROGRESS
-                # Send command to create rework task
+                logger.info("Feedback type is 'comment', transitioning to REVISIONS_IN_PROGRESS state")
+                
+                # Get the review item to find the associated task
+                review_item = await self.review_item_repository.get_review_item(event.review_item_id)
+                if not review_item:
+                    raise ValueError(f"Review item {event.review_item_id} not found")
+                
+                # Create rework task for comments - original task remains in its current state
                 command = CreateReworkTaskCommand(
                     project_id=event.project_id,
                     deliverable_id=event.deliverable_id,
-                    original_task_id=None, # You'll need to link this from the ReviewItem data
-                    comment_id=event.event_id, # Using event_id as comment_id for simplicity
-                    rework_description=event.comment_text or "Client left a comment"
+                    original_task_id=review_item.task_id,  # Get task ID from the review item
+                    review_item_id=event.review_item_id,
+                    comment_id=event.comment_id,
+                    task_name="Rework: General Rework - Client Comment",
+                    task_type="rework",
+                    task_status="to_do",
+                    priority="high",
+                    description=f"Client Comment: {event.comment_text}"
                 )
+                
                 await self.saga_processor.publish_message(
-                    topic="deliverable.command.create_rework_task", # Define this topic
-                    message_payload=command
-                )
-                await self.saga_processor.publish_message( # Also update internal task status for rework
-                    topic="production.command.update_internal_task_status", # Define this topic
-                    message_payload=UpdateInternalTaskStatusCommand(
-                        project_id=event.project_id,
-                        deliverable_id=event.deliverable_id,
-                        task_id=event.review_item_id, # Assuming review_item_id links to a production task
-                        new_status="awaiting_rework" # Placeholder status
-                    )
+                    topic="deliverable.command.create_rework_task",
+                    message=command
                 )
             
             elif event.feedback_type == "reject":
@@ -449,7 +453,7 @@ class DeliverableSagaOrchestrator:
                     reason=event.comment_text or "Rejected by client"
                 )
                 await self.saga_processor.publish_message(
-                    topic="deliverable.review_item.rejected", # Define this topic
+                    topic="deliverable.review_item.rejected",
                     message_payload=review_rejected_event
                 )
 
@@ -459,20 +463,34 @@ class DeliverableSagaOrchestrator:
                     message_payload=UpdateInternalTaskStatusCommand(
                         project_id=event.project_id,
                         deliverable_id=event.deliverable_id,
-                        task_id=event.review_item_id, # Assuming this links to the main task
-                        new_status="rejected_terminated" # Defined in TaskStatus Enum
+                        task_id=event.review_item_id,
+                        new_status="rejected_terminated"
                     )
+                )
+
+                # Also create a rework task for the rejection
+                rework_command = CreateReworkTaskCommand(
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    original_task_id=event.review_item_id,
+                    review_item_id=event.review_item_id,  # Pass the review item ID
+                    comment_id=event.event_id,
+                    rework_description=f"Rejected by client: {event.comment_text or 'No reason provided'}"
+                )
+                await self.saga_processor.publish_message(
+                    topic="deliverable.command.create_rework_task",
+                    message_payload=rework_command
                 )
                 
                 # Also notify Project Orchestrator about the deliverable's rejection/failure
-                from src.events.project_events import DeliverableFailedEvent as ProjectDeliverableFailedEvent
                 await self.saga_processor.publish_message(
                     topic="project.deliverable.failed", # Define this topic
-                    message_payload=ProjectDeliverableFailedEvent(
+                    message_payload=DeliverableFailedEvent(
+                        event_id=uuid.uuid4(),
+                        timestamp=datetime.utcnow(),
                         project_id=event.project_id,
                         deliverable_id=event.deliverable_id,
-                        deliverable_name="Unknown Deliverable Name", # Needs to be fetched if possible
-                        reason=f"Deliverable rejected by client: {event.comment_text or 'No reason provided'}"
+                        failure_reason=f"Deliverable rejected by client: {event.comment_text or 'No reason provided'}"
                     )
                 )
 
@@ -578,3 +596,96 @@ class DeliverableSagaOrchestrator:
                 # if the orchestrator fails to process its own event.
         else:
             logger.warning(f"No handler registered for event type: {event_type} in DeliverableSagaOrchestrator.")
+
+    async def handle_client_feedback_submitted_event(self, event: ClientFeedbackSubmittedEvent) -> None:
+        """Handle client feedback submitted event."""
+        logger.info(f"Handling client feedback submitted event for deliverable {event.deliverable_id}")
+        logger.info(f"Feedback type: {event.feedback_type}, Comment: {event.comment_text}")
+
+        if event.feedback_type == "accept":
+            next_state_enum = DeliverableSagaState.COMPLETED
+            logger.info("Feedback type is 'accept', transitioning to COMPLETED state")
+        elif event.feedback_type == "reject":
+            next_state_enum = DeliverableSagaState.REVISIONS_IN_PROGRESS
+            logger.info("Feedback type is 'reject', transitioning to REVISIONS_IN_PROGRESS state")
+            
+            # First update the review item status
+            await self.saga_processor.publish_message(
+                topic="deliverable.review_item.rejected",
+                message=ReviewItemRejectedEvent(
+                    event_id=uuid.uuid4(),
+                    timestamp=datetime.utcnow(),
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    review_item_id=event.review_item_id
+                )
+            )
+
+            # Then update the internal task status
+            await self.saga_processor.publish_message(
+                topic="production.command.update_internal_task_status",
+                message_payload=UpdateInternalTaskStatusCommand(
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    task_id=event.source_task_id,  # Use the source task ID from the review item
+                    new_status="rejected_terminated"
+                )
+            )
+
+            # Create rework task
+            command = CreateReworkTaskCommand(
+                project_id=event.project_id,
+                deliverable_id=event.deliverable_id,
+                original_task_id=event.source_task_id,  # Use the source task ID from the review item
+                review_item_id=event.review_item_id,  # Pass the review item ID
+                comment_id=event.event_id,
+                rework_description=event.comment_text or "Rejected by client: No reason provided"
+            )
+            await self.saga_processor.publish_message(
+                topic="deliverable.command.create_rework_task",
+                message=command
+            )
+
+            # Finally, mark the deliverable as failed
+            await self.saga_processor.publish_message(
+                topic="project.deliverable.failed",
+                message=DeliverableFailedEvent(
+                    event_id=uuid.uuid4(),
+                    timestamp=datetime.utcnow(),
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    failure_reason=event.comment_text or "Rejected by client"
+                )
+            )
+
+        elif event.feedback_type == "comment":
+            next_state_enum = DeliverableSagaState.REVISIONS_IN_PROGRESS
+            logger.info("Feedback type is 'comment', transitioning to REVISIONS_IN_PROGRESS state")
+            
+            # Get the review item to find the associated task
+            review_item = await self.review_item_repository.get_review_item(event.review_item_id)
+            if not review_item:
+                raise ValueError(f"Review item {event.review_item_id} not found")
+            
+            # Create rework task for comments - original task remains in its current state
+            command = CreateReworkTaskCommand(
+                project_id=event.project_id,
+                deliverable_id=event.deliverable_id,
+                original_task_id=review_item.task_id,  # Get task ID from the review item
+                review_item_id=event.review_item_id,
+                comment_id=event.comment_id,
+                task_name="Rework: General Rework - Client Comment",
+                task_type="rework",
+                task_status="to_do",
+                priority="high",
+                description=f"Client Comment: {event.comment_text}"
+            )
+            
+            await self.saga_processor.publish_message(
+                topic="deliverable.command.create_rework_task",
+                message=command
+            )
+
+        # Update SAGA state
+        logger.info(f"Updating SAGA state to {next_state_enum}")
+        await self.saga_processor.transition_state(next_state_enum)
