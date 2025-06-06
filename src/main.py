@@ -1,4 +1,9 @@
 # src/main.py
+<<<<<<< HEAD
+=======
+# src/main.py (UPDATED WITH AUTH INTEGRATION)
+
+>>>>>>> d0b8b64 (authentication)
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import logging
@@ -13,9 +18,9 @@ from src.config.event_bus import get_event_bus, close_event_bus
 from src.middleware.auth_middleware import AuthenticationMiddleware
 from src.integrations.auth_service_client import get_auth_client, close_auth_client
 
-# --- IMPORT YOUR API ROUTERS ---
 from src.api.projects.controllers import router as projects_router
 from src.api.deliverables.controllers import router as deliverables_router
+<<<<<<< HEAD
 from src.api.review_items.controllers import router as review_items_router
 from src.api.integration.auth_endpoints import router as integration_router
 from src.api.internal_tasks.controllers import router as internal_tasks_router
@@ -30,6 +35,17 @@ from src.listeners.client_feedback_listener import start_listening as start_clie
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
+=======
+from src.api.internal_tasks.controllers import router as internal_tasks_router  # <--- NEW IMPORT
+from src.api.debug_controller import router as debug_router  # <--- DEBUG IMPORT
+
+# --- IMPORT YOUR LISTENERS ---
+from src.listeners.project_events_listener import start_listening as start_project_events_listener
+from src.listeners.deliverable_events_listener import start_listening as start_deliverable_events_listener
+from src.listeners.review_management_listener import start_listening as start_review_management_listener
+from src.listeners.client_feedback_listener import start_listening as start_client_feedback_listener
+
+>>>>>>> d0b8b64 (authentication)
 logger = logging.getLogger(__name__)
 
 background_tasks: List[asyncio.Task] = []
@@ -124,6 +140,17 @@ app = FastAPI(
     lifespan=lifespan # Attach the lifespan context manager
 )
 
+<<<<<<< HEAD
+=======
+# --- INCLUDE YOUR API ROUTERS HERE ---
+app.include_router(projects_router, prefix="/api/v1")
+app.include_router(deliverables_router, prefix="/api/v1")
+app.include_router(review_items_router, prefix="/api/v1")
+app.include_router(internal_tasks_router, prefix="/api/v1")
+app.include_router(project_outputs_router, prefix="/api/v1")
+app.include_router(debug_router, prefix="/api/v1")  # <--- ADD DEBUG ROUTER
+
+>>>>>>> d0b8b64 (authentication)
 # Add authentication middleware
 app.add_middleware(
     AuthenticationMiddleware,
@@ -143,7 +170,10 @@ app.include_router(deliverables_router, prefix="/api/v1")
 app.include_router(review_items_router, prefix="/api/v1")
 app.include_router(internal_tasks_router, prefix="/api/v1")
 app.include_router(integration_router, prefix="/api/v1")
+<<<<<<< HEAD
 app.include_router(debug_router, prefix="/api/v1")
+=======
+>>>>>>> d0b8b64 (authentication)
 
 @app.get("/api/v1/health")
 async def health_check():
