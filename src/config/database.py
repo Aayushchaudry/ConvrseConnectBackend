@@ -3,15 +3,30 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
 from src.config.settings import settings
+import re
 
 # Base class for declarative models
 Base = declarative_base()
 
+def get_schema_from_url(url: str) -> tuple[str, str]:
+    """Extract schema from database URL and return clean URL and schema name"""
+    schema_match = re.search(r'[?&]schema=([^&]+)', url)
+    if schema_match:
+        schema = schema_match.group(1)
+        clean_url = re.sub(r'[?&]schema=[^&]+', '', url)
+        # Remove trailing ? or & if they exist
+        clean_url = re.sub(r'[?&]$', '', clean_url)
+        return clean_url, schema
+    return url, 'public'
+
+database_url, schema_name = get_schema_from_url(settings.DATABASE_URL)
+
 # Create an async SQLAlchemy engine
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    database_url,
     echo=settings.DEBUG, # Set to True to log all SQL statements for debugging
-    pool_pre_ping=True # Ensures connections are healthy
+    pool_pre_ping=True, # Ensures connections are healthy
+    connect_args={"server_settings": {"search_path": schema_name}}
 )
 
 # Async sessionmaker for database operations
