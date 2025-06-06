@@ -1,6 +1,4 @@
-# src/main.py (UPDATED WITH AUTH INTEGRATION)
 # src/main.py
-
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import logging
@@ -18,17 +16,20 @@ from src.integrations.auth_service_client import get_auth_client, close_auth_cli
 # --- IMPORT YOUR API ROUTERS ---
 from src.api.projects.controllers import router as projects_router
 from src.api.deliverables.controllers import router as deliverables_router
+from src.api.review_items.controllers import router as review_items_router
 from src.api.integration.auth_endpoints import router as integration_router
-from src.api.internal_tasks.controllers import router as internal_tasks_router  # <--- NEW IMPORT
-from src.api.debug_controller import router as debug_router  # <--- DEBUG IMPORT
+from src.api.internal_tasks.controllers import router as internal_tasks_router
+from src.api.debug_controller import router as debug_router
 
 # --- IMPORT YOUR LISTENERS ---
 from src.listeners.info_gathering_listener import start_listening as start_info_gathering_listener
 from src.listeners.deliverable_events_listener import start_listening as start_deliverable_events_listener
 from src.listeners.production_management_listener import start_listening as start_production_management_listener
 from src.listeners.review_management_listener import start_listening as start_review_management_listener
+from src.listeners.client_feedback_listener import start_listening as start_client_feedback_listener
 
-
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 background_tasks: List[asyncio.Task] = []
@@ -68,11 +69,6 @@ async def lifespan(app: FastAPI):
         logger.info("Event Bus initialized and connected successfully.")
 
         # 4. Start SAGA Listeners
-        # Project Events Listener
-        project_listener_task = asyncio.create_task(start_project_events_listener(event_bus))
-        background_tasks.append(project_listener_task)
-        logger.info("Project Events Listener started in background.")
-        
         # Information Gathering Listener
         info_gathering_listener_task = asyncio.create_task(start_info_gathering_listener(event_bus))
         background_tasks.append(info_gathering_listener_task)
@@ -97,11 +93,6 @@ async def lifespan(app: FastAPI):
         client_feedback_listener_task = asyncio.create_task(start_client_feedback_listener(event_bus))
         background_tasks.append(client_feedback_listener_task)
         logger.info("Client Feedback Listener started in background.")
-
-        # Delivery Listener # <--- NEW LISTENER STARTUP
-        delivery_listener_task = asyncio.create_task(start_delivery_listener(event_bus))
-        background_tasks.append(delivery_listener_task)
-        logger.info("Delivery Listener started in background.")
         
     except Exception as e:
         logger.error(f"Failed to initialize Event Bus or start listeners: {e}")
@@ -149,15 +140,10 @@ app.add_middleware(
 # Include your API routers here
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(deliverables_router, prefix="/api/v1")
-app.include_router(integration_router, prefix="/api/v1")
-# --- INCLUDE YOUR API ROUTERS HERE ---
-app.include_router(projects_router, prefix="/api/v1")
-app.include_router(deliverables_router, prefix="/api/v1")
 app.include_router(review_items_router, prefix="/api/v1")
 app.include_router(internal_tasks_router, prefix="/api/v1")
-app.include_router(project_outputs_router, prefix="/api/v1")
-app.include_router(debug_router, prefix="/api/v1")  # <--- ADD DEBUG ROUTER
-
+app.include_router(integration_router, prefix="/api/v1")
+app.include_router(debug_router, prefix="/api/v1")
 
 @app.get("/api/v1/health")
 async def health_check():
