@@ -1,4 +1,5 @@
 # src/main.py (UPDATED WITH AUTH INTEGRATION)
+# src/main.py
 
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
@@ -7,7 +8,7 @@ import asyncio
 from typing import List
 
 from src.config.settings import settings
-from src.config.database import init_db
+from src.config.database import init_db 
 from src.config.event_bus import get_event_bus, close_event_bus
 
 # --- AUTH INTEGRATION IMPORTS ---
@@ -18,15 +19,16 @@ from src.integrations.auth_service_client import get_auth_client, close_auth_cli
 from src.api.projects.controllers import router as projects_router
 from src.api.deliverables.controllers import router as deliverables_router
 from src.api.integration.auth_endpoints import router as integration_router
+from src.api.internal_tasks.controllers import router as internal_tasks_router  # <--- NEW IMPORT
+from src.api.debug_controller import router as debug_router  # <--- DEBUG IMPORT
 
 # --- IMPORT YOUR LISTENERS ---
-from src.listeners.project_events_listener import start_listening as start_project_events_listener
 from src.listeners.info_gathering_listener import start_listening as start_info_gathering_listener
 from src.listeners.deliverable_events_listener import start_listening as start_deliverable_events_listener
 from src.listeners.production_management_listener import start_listening as start_production_management_listener
+from src.listeners.review_management_listener import start_listening as start_review_management_listener
 
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 background_tasks: List[asyncio.Task] = []
@@ -44,7 +46,7 @@ async def lifespan(app: FastAPI):
         logger.info("Database initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
-        raise
+        raise 
 
     # 2. Initialize Auth Service Client
     try:
@@ -70,7 +72,7 @@ async def lifespan(app: FastAPI):
         project_listener_task = asyncio.create_task(start_project_events_listener(event_bus))
         background_tasks.append(project_listener_task)
         logger.info("Project Events Listener started in background.")
-
+        
         # Information Gathering Listener
         info_gathering_listener_task = asyncio.create_task(start_info_gathering_listener(event_bus))
         background_tasks.append(info_gathering_listener_task)
@@ -86,6 +88,21 @@ async def lifespan(app: FastAPI):
         background_tasks.append(production_management_listener_task)
         logger.info("Production Management Listener started in background.")
 
+        # Review Management Listener
+        review_management_listener_task = asyncio.create_task(start_review_management_listener(event_bus))
+        background_tasks.append(review_management_listener_task)
+        logger.info("Review Management Listener started in background.")
+
+        # Client Feedback Listener
+        client_feedback_listener_task = asyncio.create_task(start_client_feedback_listener(event_bus))
+        background_tasks.append(client_feedback_listener_task)
+        logger.info("Client Feedback Listener started in background.")
+
+        # Delivery Listener # <--- NEW LISTENER STARTUP
+        delivery_listener_task = asyncio.create_task(start_delivery_listener(event_bus))
+        background_tasks.append(delivery_listener_task)
+        logger.info("Delivery Listener started in background.")
+        
     except Exception as e:
         logger.error(f"Failed to initialize Event Bus or start listeners: {e}")
         raise
@@ -133,6 +150,14 @@ app.add_middleware(
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(deliverables_router, prefix="/api/v1")
 app.include_router(integration_router, prefix="/api/v1")
+# --- INCLUDE YOUR API ROUTERS HERE ---
+app.include_router(projects_router, prefix="/api/v1")
+app.include_router(deliverables_router, prefix="/api/v1")
+app.include_router(review_items_router, prefix="/api/v1")
+app.include_router(internal_tasks_router, prefix="/api/v1")
+app.include_router(project_outputs_router, prefix="/api/v1")
+app.include_router(debug_router, prefix="/api/v1")  # <--- ADD DEBUG ROUTER
+
 
 @app.get("/api/v1/health")
 async def health_check():

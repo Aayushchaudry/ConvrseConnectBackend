@@ -250,32 +250,44 @@ class DeliverableSagaOrchestrator:
                 return
             
             # Logic to determine next state based on task type and current SAGA state
-            next_state = saga_state.current_state # Default to no change
+            current_saga_state = DeliverableSagaState(saga_state.current_state) # Get current state as Enum
+            next_state = current_saga_state # Default to no change
             next_command = None
             command_topic = None
+            command_id_to_record = None # Default no command ID to record
 
-            if saga_state.current_state == DeliverableSagaState.MODELING_PENDING.value and event.task_type == "modeling":
+            # --- Logic to determine next state and command based on completed task ---
+            if current_saga_state == DeliverableSagaState.MODELING_PENDING and event.task_type == "modeling":
                 next_state = DeliverableSagaState.MODELING_COMPLETED
-                next_command = InitiateTexturingCommand(project_id=event.project_id, deliverable_id=event.deliverable_id)
-                command_topic = "deliverable.command.initiate_texturing"
-            elif saga_state.current_state == DeliverableSagaState.TEXTURING_PENDING.value and event.task_type == "texturing":
+                # After modeling is completed, the next step is to generate a review item
+                # for client approval of the modeling work.
+                next_command = GenerateReviewItemCommand(
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    review_item_type="static_render", # Type of review item
+                    asset_urls=["http://example.com/placeholder_render.jpg"] # Placeholder URL for the generated render
+                )
+                command_topic = "deliverable.command.generate_review_item"
+                command_id_to_record = next_command.command_id
+                
+            elif current_saga_state == DeliverableSagaState.TEXTURING_PENDING and event.task_type == "texturing":
                 next_state = DeliverableSagaState.TEXTURING_COMPLETED
                 next_command = InitiateRenderingCommand(project_id=event.project_id, deliverable_id=event.deliverable_id, render_type="first_draft")
                 command_topic = "deliverable.command.initiate_rendering"
+                command_id_to_record = next_command.command_id
             # ... and so on for other task types and transitions
 
+            # --- Send Command if determined ---
             if next_command:
                 await self.saga_processor.publish_message(topic=command_topic, message_payload=next_command)
-                command_id_to_record = next_command.command_id
-            else:
-                command_id_to_record = None # No command sent
 
+            # --- Update SAGA State ---
             await self.saga_processor.update_saga_state(
                 session=session,
                 saga_state=saga_state,
                 new_state_enum=next_state,
                 event_id=event.event_id,
-                command_id=command_id_to_record
+                command_id=command_id_to_record # Record the command ID if one was sent
             )
             logger.info(f"Deliverable SAGA for {event.deliverable_id} transitioned to {next_state.value} after task '{event.task_name}' completion.")
 
@@ -365,9 +377,6 @@ class DeliverableSagaOrchestrator:
             # --- Core Logic for Client Feedback ---
             if event.feedback_type == "accept":
                 next_state_enum = DeliverableSagaState.CLIENT_REVIEW_ACCEPTED
-                # Example: If this is the final approval, send GenerateFinalOutputCommand
-                # For now, let's just assume it transitions to accepted state
-                # In a real app, you'd check review_round or item_type if this is final.
                 
                 # Publish event that review item was approved
                 review_approved_event = ReviewItemApprovedEvent(
@@ -387,14 +396,21 @@ class DeliverableSagaOrchestrator:
                     message_payload=UpdateDeliverableStatusInDBCommand(
                         project_id=event.project_id,
                         deliverable_id=event.deliverable_id,
-                        new_status=DeliverableStatus.READY_FOR_FINAL_DELIVERY.value # Example transition
+                        new_status=DeliverableStatus.READY_FOR_DELIVERY.value # Example transition
                     )
                 )
 
-                # If this is the final stage, then send GenerateFinalOutputCommand
-                # if current_saga_state == DeliverableSagaState.AWAITING_FINAL_REVIEW_APPROVAL:
-                #    command = GenerateFinalOutputCommand(...)
-                #    await self.saga_processor.publish_message(topic="deliverable.command.generate_final_output", message_payload=command)
+                # Send GenerateFinalOutputCommand for final delivery
+                command = GenerateFinalOutputCommand(
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    output_name=f"Final Output for {event.deliverable_id}"
+                )
+                await self.saga_processor.publish_message(
+                    topic="deliverable.command.generate_final_output", 
+                    message_payload=command
+                )
+                logger.info(f"DeliverableSagaOrchestrator: Sent GenerateFinalOutputCommand for Deliverable {event.deliverable_id}")
 
             elif event.feedback_type == "comment":
                 next_state_enum = DeliverableSagaState.REVISIONS_IN_PROGRESS

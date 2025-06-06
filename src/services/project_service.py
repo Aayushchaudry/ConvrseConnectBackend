@@ -36,12 +36,15 @@ class ProjectService:
         Returns:
             Project: The newly created Project ORM object.
         """
+        logger.info(f"Creating new project: {name}")
+        
         # For simplicity, parsing dates here. In a real app,
         # you might do this in a Pydantic schema or a dedicated helper.
         try:
             parsed_start_date = datetime.fromisoformat(start_date) if start_date else None
             parsed_end_date = datetime.fromisoformat(end_date) if end_date else None
         except ValueError as e:
+            logger.error(f"Invalid date format for start_date or end_date: {e}")
             raise ValueError(f"Invalid date format for start_date or end_date: {e}")
 
         new_project = Project(
@@ -55,19 +58,30 @@ class ProjectService:
         self.db_session.add(new_project)
         await self.db_session.commit()
         await self.db_session.refresh(new_project)
+        
+        logger.info(f"Project created in database: {new_project.id}")
 
         # Create and publish the ProjectCreatedEvent for SAGA orchestration
+        logger.info(f"Creating ProjectCreatedEvent for project {new_project.id}")
         event = ProjectCreatedEvent(
             project_id=new_project.id,
             project_name=new_project.name,
             initial_status=new_project.status.value
         )
         
+        logger.info(f"ProjectCreatedEvent created: {event}")
+        logger.info(f"Event dict: {event.__dict__}")
+        
         try:
+            logger.info(f"Publishing event to topic 'project.created'...")
             await self.event_bus.publish(topic="project.created", message=event.__dict__)
-            logger.info(f"ProjectCreatedEvent published to topic 'project.created' for project {new_project.id} ({new_project.name})")
+            logger.info(f"✅ ProjectCreatedEvent published successfully to topic 'project.created' for project {new_project.id} ({new_project.name})")
         except Exception as e:
-            logger.error(f"Failed to publish ProjectCreatedEvent for project {new_project.id}: {e}")
+            logger.error(f"❌ Failed to publish ProjectCreatedEvent for project {new_project.id}: {e}")
+            logger.error(f"Event bus type: {type(self.event_bus)}")
+            logger.error(f"Event dict: {event.__dict__}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             # Note: In production, you might want to implement retry logic or compensation here
             raise
 

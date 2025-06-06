@@ -52,6 +52,11 @@ async def start_listening(event_bus: EventBus):
         group_id=settings.KAFKA_CONSUMER_GROUP_ID + "-start-deliverable-saga"
     )
 
+    # Start both consumers
+    await general_deliverable_consumer.start()
+    await start_saga_command_consumer.start()
+    logger.info(f"Started consumers for deliverable events")
+
     # Start separate async tasks for each consumer loop
     general_events_task = asyncio.create_task(
         _listen_loop(general_deliverable_consumer, deliverable_orchestrator.handle_event)
@@ -69,7 +74,8 @@ async def _listen_loop(consumer: Any, handler: Callable[[Dict[str, Any]], Any]):
     Generic loop to consume messages from a given consumer and call a handler.
     """
     try:
-        for message in consumer:
+        # Use async iteration for AIOKafkaConsumer (FIXED!)
+        async for message in consumer:
             logger.info(f"Deliverable Listener received message: Topic='{message.topic}', Offset={message.offset}, Type='{message.value.get('event_type') or message.value.get('command_type')}'")
             try:
                 # The handler expects the deserialized message value (dict)
@@ -82,5 +88,5 @@ async def _listen_loop(consumer: Any, handler: Callable[[Dict[str, Any]], Any]):
     except Exception as e:
         logger.error(f"Deliverable Events Listener loop crashed: {e}", exc_info=True)
     finally:
-        consumer.close()
+        await consumer.stop()  # Use stop() instead of close() for AIOKafkaConsumer
         logger.info("Deliverable Events Listener consumer closed.")

@@ -275,3 +275,50 @@ class ProductionManagementService:
                 logger.error(f"Error updating task status for Task {command.task_id}: {e}", exc_info=True)
                 await session.rollback()
                 # Consider publishing a specific event for task status update failure here.
+
+    async def complete_internal_task(self, task_id: UUID, actual_end_date: datetime = None) -> InternalTask:
+        """
+        Simulates the completion of an internal task by updating its status to DONE
+        and publishing InternalTaskCompletedEvent.
+        """
+        logger.info(f"ProductionManagementService: Attempting to complete Task {task_id}.")
+
+        async with self.db_session_factory() as session:
+            from sqlalchemy import select
+            task = await session.execute(
+                select(InternalTask).filter(InternalTask.id == task_id)
+            )
+            task = task.scalar_one_or_none()
+
+            if not task:
+                raise ValueError(f"Task with ID {task_id} not found.")
+
+            if task.status == TaskStatus.DONE:
+                logger.warning(f"Task {task_id} is already DONE. Skipping update.")
+                return task
+
+            old_status = task.status.value
+            task.status = TaskStatus.DONE
+            task.actual_end_date = actual_end_date or datetime.utcnow()  # Use provided date or current time
+            
+            session.add(task)
+            await session.commit()
+            await session.refresh(task)
+
+            logger.info(f"ProductionManagementService: Task {task.id} status updated from {old_status} to DONE.")
+
+            # Publish event that the task was completed
+            await self.event_bus.publish(
+                topic="internal_task.completed",
+                message=InternalTaskCompletedEvent(
+                    project_id=task.project_id,
+                    deliverable_id=task.deliverable_id,
+                    task_id=task.id,
+                    task_name=task.task_name,
+                    task_type=task.task_type.value
+                ).__dict__
+            )
+            logger.info(f"ProductionManagementService: Published InternalTaskCompletedEvent for Task {task.id}.")
+            return task
+                
+                

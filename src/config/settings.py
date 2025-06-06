@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Database settings
-    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/project_db"
+    DATABASE_URL: str = "postgresql+asyncpg://ConvrseConnect:ConvrseConnect123@localhost:5433/project_db"
 
     # Event Bus general settings
     # Options: "kafka", "sqs_mock", "sqs" (when implemented)
