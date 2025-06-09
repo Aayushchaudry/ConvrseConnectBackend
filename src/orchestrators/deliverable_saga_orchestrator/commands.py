@@ -1,10 +1,11 @@
 # src/orchestrators/deliverable_saga_orchestrator/commands.py
 
+import uuid  # For uuid.uuid4()
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-import uuid # For uuid.uuid4()
-from typing import Optional, List, Dict, Any
+
 
 # --- Base Command Definition ---
 # All your commands inherit from this to ensure common fields.
@@ -15,10 +16,12 @@ class BaseCommand:
     command_type: str
 
     def __post_init__(self):
-        if not hasattr(self, 'command_type') or self.command_type is None:
+        if not hasattr(self, "command_type") or self.command_type is None:
             self.command_type = self.__class__.__name__
 
+
 # --- Commands sent by Deliverable SAGA Orchestrator ---
+
 
 @dataclass
 class StartDeliverableInfoGatheringCommand(BaseCommand):
@@ -28,14 +31,22 @@ class StartDeliverableInfoGatheringCommand(BaseCommand):
     Published by: Deliverable SAGA Orchestrator (often initial step after SAGA start)
     Consumed by: Information Gathering Service
     """
+
     project_id: UUID
     deliverable_id: UUID
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, command_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, command_type: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        command_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        command_type: Optional[str] = None,
+    ):
         super().__init__(
-            command_id=command_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            command_type=command_type or "StartDeliverableInfoGatheringCommand"
+            command_id=command_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            command_type=command_type or "StartDeliverableInfoGatheringCommand",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -49,16 +60,24 @@ class InitiateModelingCommand(BaseCommand):
     Published by: Deliverable SAGA Orchestrator
     Consumed by: Production Management Service
     """
+
     project_id: UUID
     deliverable_id: UUID
     # Optional: Initial modeling requirements (e.g., specific CAD files to use)
     # modeling_requirements: Optional[Dict[str, Any]] = None
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, command_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, command_type: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        command_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        command_type: Optional[str] = None,
+    ):
         super().__init__(
-            command_id=command_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            command_type=command_type or "InitiateModelingCommand"
+            command_id=command_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            command_type=command_type or "InitiateModelingCommand",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -72,15 +91,23 @@ class InitiateTexturingCommand(BaseCommand):
     Published by: Deliverable SAGA Orchestrator
     Consumed by: Production Management Service
     """
+
     project_id: UUID
     deliverable_id: UUID
     # Optional: Specific material/texture details
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, command_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, command_type: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        command_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        command_type: Optional[str] = None,
+    ):
         super().__init__(
-            command_id=command_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            command_type=command_type or "InitiateTexturingCommand"
+            command_id=command_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            command_type=command_type or "InitiateTexturingCommand",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -94,16 +121,25 @@ class InitiateRenderingCommand(BaseCommand):
     Published by: Deliverable SAGA Orchestrator
     Consumed by: Production Management Service
     """
+
     project_id: UUID
     deliverable_id: UUID
-    render_type: str # e.g., 'white_render', 'low_res_texture_render', 'final_render'
+    render_type: str  # e.g., 'white_render', 'low_res_texture_render', 'final_render'
     # Optional: camera_angles: List[Dict[str, Any]] = None # For specific renders
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, render_type: str, command_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, command_type: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        render_type: str,
+        command_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        command_type: Optional[str] = None,
+    ):
         super().__init__(
-            command_id=command_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            command_type=command_type or "InitiateRenderingCommand"
+            command_id=command_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            command_type=command_type or "InitiateRenderingCommand",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -118,16 +154,28 @@ class GenerateReviewItemCommand(BaseCommand):
     Published by: Deliverable SAGA Orchestrator
     Consumed by: Review Service
     """
+
     project_id: UUID
     deliverable_id: UUID
-    review_item_type: str # e.g., 'white_render_review', 'texture_review', 'final_review'
-    asset_urls: List[str] # URLs to the assets to be reviewed
-    
-    def __init__(self, project_id: UUID, deliverable_id: UUID, review_item_type: str, asset_urls: List[str] = None, command_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, command_type: Optional[str] = None):
+    review_item_type: (
+        str  # e.g., 'white_render_review', 'texture_review', 'final_review'
+    )
+    asset_urls: List[str]  # URLs to the assets to be reviewed
+
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        review_item_type: str,
+        asset_urls: List[str] = None,
+        command_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        command_type: Optional[str] = None,
+    ):
         super().__init__(
-            command_id=command_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            command_type=command_type or "GenerateReviewItemCommand"
+            command_id=command_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            command_type=command_type or "GenerateReviewItemCommand",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -143,16 +191,25 @@ class GenerateFinalOutputCommand(BaseCommand):
     Published by: Deliverable SAGA Orchestrator
     Consumed by: Delivery Service
     """
+
     project_id: UUID
     deliverable_id: UUID
     output_name: str
     # Optional: final_asset_locations: List[str] # URLs to final files
-    
-    def __init__(self, project_id: UUID, deliverable_id: UUID, output_name: str, command_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, command_type: Optional[str] = None):
+
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        output_name: str,
+        command_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        command_type: Optional[str] = None,
+    ):
         super().__init__(
-            command_id=command_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            command_type=command_type or "GenerateFinalOutputCommand"
+            command_id=command_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            command_type=command_type or "GenerateFinalOutputCommand",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -167,15 +224,24 @@ class UpdateDeliverableStatusInDBCommand(BaseCommand):
     Published by: Deliverable SAGA Orchestrator
     Consumed by: Deliverable Service
     """
+
     project_id: UUID
     deliverable_id: UUID
-    new_status: str # String representation of DeliverableStatus enum
+    new_status: str  # String representation of DeliverableStatus enum
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, new_status: str, command_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, command_type: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        new_status: str,
+        command_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        command_type: Optional[str] = None,
+    ):
         super().__init__(
-            command_id=command_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            command_type=command_type or "UpdateDeliverableStatusInDBCommand"
+            command_id=command_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            command_type=command_type or "UpdateDeliverableStatusInDBCommand",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id

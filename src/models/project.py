@@ -2,55 +2,80 @@
 
 import enum
 import uuid
-from sqlalchemy import Column, String, DateTime, func, DECIMAL, Enum, Integer
+
+from sqlalchemy import DECIMAL, Column, DateTime, Enum, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship # Used for defining relationships between models
-from src.config.database import Base # Import Base from your database config
+from sqlalchemy.orm import (
+    relationship,
+)  # Used for defining relationships between models
+
+from src.config.database import Base  # Import Base from your database config
+
 
 # --- Enums for Project Status ---
 # Using the exact status values provided by you.
 class ProjectStatus(enum.Enum):
     """Defines the high-level status of a project."""
+
     INITIATED = "initiated"
     INFO_GATHERING = "info_gathering"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
 
+
 # --- Project ORM Model ---
+
 
 class Project(Base):
     """
     SQLAlchemy model for the 'projects' table.
     Represents a high-level project in the system.
     """
-    __tablename__ = "projects" # This defines the table name in the database
+
+    __tablename__ = "projects"  # This defines the table name in the database
 
     # project_id as Primary Key (maps to 'id' in SQLAlchemy for consistency)
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
-    name = Column(String(255), nullable=False, index=True) # Project name, indexed for faster lookup
-    
+
+    name = Column(
+        String(255), nullable=False, index=True
+    )  # Project name, indexed for faster lookup
+
     # Status of the project, using our new defined Enum
-    status = Column(Enum(ProjectStatus), default=ProjectStatus.INITIATED, nullable=False)
-    
+    status = Column(
+        Enum(ProjectStatus), default=ProjectStatus.INITIATED, nullable=False
+    )
+
     # Financial details - renamed from total_fee to budget
-    budget = Column(DECIMAL(10, 2), nullable=True) # Total budget for the project, e.g., 3422020.00
-    
+    budget = Column(
+        DECIMAL(10, 2), nullable=True
+    )  # Total budget for the project, e.g., 3422020.00
+
     # Timelines - end_date instead of due_date
     start_date = Column(DateTime, nullable=True)
-    end_date = Column(DateTime, nullable=True) # Overall project deadline (renamed from due_date)
+    end_date = Column(
+        DateTime, nullable=True
+    )  # Overall project deadline (renamed from due_date)
 
     # --- AUTH INTEGRATION FIELDS ---
     # Business context - links project to a business from auth-service
-    business_id = Column(Integer, nullable=False, index=True) # Foreign key to businesses table in auth-service
-    
+    business_id = Column(
+        Integer, nullable=False, index=True
+    )  # Foreign key to businesses table in auth-service
+
     # User context - who created and is assigned to this project
-    created_by = Column(Integer, nullable=False, index=True) # Foreign key to users table in auth-service
-    assigned_to = Column(Integer, nullable=True, index=True) # Foreign key to users table in auth-service (optional)
+    created_by = Column(
+        Integer, nullable=False, index=True
+    )  # Foreign key to users table in auth-service
+    assigned_to = Column(
+        Integer, nullable=True, index=True
+    )  # Foreign key to users table in auth-service (optional)
 
     # Automatic timestamps for auditing
     created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     # --- Relationships (will be defined as other models are created) ---
     # These define how this Project model relates to other models.

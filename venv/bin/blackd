@@ -1,4 +1,4 @@
-#!/Users/apple/Desktop/convrse_connect_backend/venv/bin/python
+#!/Users/tonystark/convrse/ConvrseConnectBackend/venv/bin/python3.13
 # -*- coding: utf-8 -*-
 import re
 import sys

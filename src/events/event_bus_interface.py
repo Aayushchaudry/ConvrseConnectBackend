@@ -1,7 +1,8 @@
 # src/events/event_bus_interface.py
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Callable
+from typing import Any, Callable, Dict
+
 
 class EventBus(ABC):
     """

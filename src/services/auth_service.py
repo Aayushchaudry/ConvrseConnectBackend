@@ -10,4 +10,4 @@ User authentication/authorization logic.
 # TODO: Implement password hashing and verification
 # TODO: Manage user roles and permissions
 # TODO: Handle password reset and email verification
-# TODO: Implement session management and logout 
+# TODO: Implement session management and logout

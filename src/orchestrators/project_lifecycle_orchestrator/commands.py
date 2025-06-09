@@ -14,4 +14,4 @@ Definitions of commands Project Orchestrator sends.
 #   - CompleteProjectCommand
 #   - CancelProjectCommand
 # TODO: Include necessary data fields for each command
-# TODO: Add validation and serialization methods 
+# TODO: Add validation and serialization methods

@@ -12,4 +12,4 @@ Common validation functions for data integrity and business rules.
 #   - User input validation
 # TODO: Implement custom validation rules
 # TODO: Add validation decorators and middleware
-# TODO: Create validation error formatting utilities 
+# TODO: Create validation error formatting utilities

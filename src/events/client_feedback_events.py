@@ -1,10 +1,11 @@
 # src/events/client_feedback_events.py
 
+import uuid  # For uuid.uuid4()
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-import uuid # For uuid.uuid4()
-from typing import Optional, List, Dict, Any
+
 
 # --- Base Event Definition ---
 @dataclass
@@ -14,10 +15,12 @@ class BaseEvent:
     event_type: str
 
     def __post_init__(self):
-        if not hasattr(self, 'event_type') or self.event_type is None:
+        if not hasattr(self, "event_type") or self.event_type is None:
             self.event_type = self.__class__.__name__
 
+
 # --- Client Feedback Specific Events ---
+
 
 @dataclass
 class ClientFeedbackSubmittedEvent(BaseEvent):
@@ -27,20 +30,34 @@ class ClientFeedbackSubmittedEvent(BaseEvent):
     Published by: Review Management Service
     Consumed by: Deliverable SAGA Orchestrator (core event for review cycle)
     """
+
     project_id: UUID
     deliverable_id: UUID
     review_item_id: UUID
-    client_user_id: Optional[UUID] # User who gave feedback (if authenticated)
-    feedback_type: str # e.g., 'accept', 'reject', 'comment', 'like' (string representation of FeedbackType enum)
+    client_user_id: Optional[UUID]  # User who gave feedback (if authenticated)
+    feedback_type: str  # e.g., 'accept', 'reject', 'comment', 'like' (string representation of FeedbackType enum)
     comment_text: Optional[str] = None
-    timestamp_seconds: Optional[int] = None # For video/audio comments
-    context_coordinates: Optional[Dict[str, Any]] = None # For image region comments
+    timestamp_seconds: Optional[int] = None  # For video/audio comments
+    context_coordinates: Optional[Dict[str, Any]] = None  # For image region comments
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, review_item_id: UUID, client_user_id: Optional[UUID], feedback_type: str, comment_text: Optional[str] = None, timestamp_seconds: Optional[int] = None, context_coordinates: Optional[Dict[str, Any]] = None, event_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, event_type: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        review_item_id: UUID,
+        client_user_id: Optional[UUID],
+        feedback_type: str,
+        comment_text: Optional[str] = None,
+        timestamp_seconds: Optional[int] = None,
+        context_coordinates: Optional[Dict[str, Any]] = None,
+        event_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        event_type: Optional[str] = None,
+    ):
         super().__init__(
-            event_id=event_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            event_type=event_type or "ClientFeedbackSubmittedEvent"
+            event_id=event_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            event_type=event_type or "ClientFeedbackSubmittedEvent",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -60,16 +77,26 @@ class ReviewItemApprovedEvent(BaseEvent):
     Published by: Deliverable SAGA Orchestrator (after processing ClientFeedbackSubmittedEvent)
     Consumed by: Production Management Service (to proceed with next stage), Analytics/UI
     """
+
     project_id: UUID
     deliverable_id: UUID
     review_item_id: UUID
     approved_by_user_id: Optional[UUID] = None
-    
-    def __init__(self, project_id: UUID, deliverable_id: UUID, review_item_id: UUID, approved_by_user_id: Optional[UUID] = None, event_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, event_type: Optional[str] = None):
+
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        review_item_id: UUID,
+        approved_by_user_id: Optional[UUID] = None,
+        event_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        event_type: Optional[str] = None,
+    ):
         super().__init__(
-            event_id=event_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            event_type=event_type or "ReviewItemApprovedEvent"
+            event_id=event_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            event_type=event_type or "ReviewItemApprovedEvent",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id
@@ -85,17 +112,28 @@ class ReviewItemRejectedEvent(BaseEvent):
     Published by: Deliverable SAGA Orchestrator
     Consumed by: Production Management Service (to trigger rework/compensation), Analytics/UI
     """
+
     project_id: UUID
     deliverable_id: UUID
     review_item_id: UUID
     rejected_by_user_id: Optional[UUID] = None
-    reason: Optional[str] = None # Why it was rejected
+    reason: Optional[str] = None  # Why it was rejected
 
-    def __init__(self, project_id: UUID, deliverable_id: UUID, review_item_id: UUID, rejected_by_user_id: Optional[UUID] = None, reason: Optional[str] = None, event_id: Optional[UUID] = None, timestamp: Optional[datetime] = None, event_type: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        review_item_id: UUID,
+        rejected_by_user_id: Optional[UUID] = None,
+        reason: Optional[str] = None,
+        event_id: Optional[UUID] = None,
+        timestamp: Optional[datetime] = None,
+        event_type: Optional[str] = None,
+    ):
         super().__init__(
-            event_id=event_id or uuid.uuid4(), 
-            timestamp=timestamp or datetime.utcnow(), 
-            event_type=event_type or "ReviewItemRejectedEvent"
+            event_id=event_id or uuid.uuid4(),
+            timestamp=timestamp or datetime.utcnow(),
+            event_type=event_type or "ReviewItemRejectedEvent",
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id

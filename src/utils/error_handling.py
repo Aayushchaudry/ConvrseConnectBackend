@@ -12,4 +12,4 @@ Common error handling, exception classes, and error management utilities.
 #   - ExternalServiceError
 # TODO: Implement error logging utilities
 # TODO: Add error response formatting functions
-# TODO: Create error recovery and retry mechanisms 
+# TODO: Create error recovery and retry mechanisms
