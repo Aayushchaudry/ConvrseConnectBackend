@@ -10,12 +10,14 @@ from fastapi import FastAPI
 
 from src.api.debug_controller import router as debug_router
 from src.api.deliverables.controllers import router as deliverables_router
+from src.api.dashboard.controllers import router as dashboard_router
 from src.api.health_controller import router as health_router
 from src.api.integration.auth_endpoints import router as integration_router
 from src.api.internal_tasks.controllers import router as internal_tasks_router
 from src.api.project_outputs.controllers import router as project_outputs_router
 from src.api.projects.controllers import router as projects_router
 from src.api.review_items.controllers import router as review_items_router
+from src.api.websocket_controller import router as websocket_router
 from src.config.database import init_db
 from src.config.event_bus import close_event_bus, get_event_bus
 from src.config.settings import settings
@@ -170,12 +172,14 @@ app.add_middleware(
 # Include your API routers here
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(deliverables_router, prefix="/api/v1")
+app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(review_items_router, prefix="/api/v1")
 app.include_router(internal_tasks_router, prefix="/api/v1")
 app.include_router(project_outputs_router, prefix="/api/v1")
 app.include_router(integration_router, prefix="/api/v1")
 app.include_router(debug_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(websocket_router)
 
 
 @app.get("/health")

@@ -412,7 +412,7 @@ class AuthServiceClient:
         """Check auth service health"""
         try:
             response = await self._make_request("GET", self.endpoints.health)
-            return response.get("status") == "ok"
+            return response.get("status") in ["ok", "healthy"]
         except Exception as e:
             logger.error(f"Auth service health check failed: {e}")
             return False

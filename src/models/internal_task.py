@@ -70,7 +70,7 @@ class InternalTask(Base):
 
     # Foreign Keys linking to the Deliverable and Project
     deliverable_id = Column(
-        UUID(as_uuid=True), ForeignKey("deliverables.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("deliverables.id"), nullable=True  # Allow project-level tasks
     )
     project_id = Column(
         UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False

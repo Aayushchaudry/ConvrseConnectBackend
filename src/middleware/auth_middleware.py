@@ -347,3 +347,71 @@ def get_super_admin_dependency():
         return require_super_admin(request)
 
     return super_admin_dependency
+
+
+# WebSocket Authentication Functions
+async def get_websocket_user(websocket, token: Optional[str] = None, user_id: Optional[str] = None) -> dict:
+    """
+    Authenticate WebSocket connection using token from query parameters.
+    
+    Args:
+        websocket: The WebSocket connection
+        token: JWT token from query parameters
+        user_id: User ID from query parameters (optional)
+    
+    Returns:
+        dict: User information for WebSocket connection
+    
+    Raises:
+        WebSocketException: If authentication fails
+    """
+    from fastapi import WebSocketException, status
+    
+    # Extract token from query parameters if not provided
+    if not token:
+        query_params = dict(websocket.query_params)
+        token = query_params.get("token")
+    
+    if not token:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Authentication token required"
+        )
+    
+    try:
+        # Validate token with auth service
+        auth_client = await get_auth_client()
+        user_data = await auth_client.validate_token(token)
+        
+        if not user_data or not user_data.is_active:
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Invalid or inactive user"
+            )
+        
+        return {
+            "user_id": user_data.user_id,
+            "user_name": user_data.username,
+            "business_ids": [b.get("business_id") for b in user_data.businesses] if user_data.businesses else [],
+            "is_super_admin": user_data.role_name == "super_admin",
+            "token": token
+        }
+        
+    except TokenValidationError as e:
+        logger.warning(f"WebSocket token validation failed: {e}")
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Invalid or expired token"
+        )
+    except AuthServiceError as e:
+        logger.error(f"WebSocket auth service error: {e}")
+        raise WebSocketException(
+            code=status.WS_1011_INTERNAL_ERROR,
+            reason="Authentication service error"
+        )
+    except Exception as e:
+        logger.error(f"WebSocket authentication error: {e}")
+        raise WebSocketException(
+            code=status.WS_1011_INTERNAL_ERROR,
+            reason="Authentication failed"
+        )
