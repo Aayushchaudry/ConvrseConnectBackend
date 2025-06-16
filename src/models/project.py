@@ -65,11 +65,11 @@ class Project(Base):
 
     # User context - who created and is assigned to this project
     created_by = Column(
-        Integer, nullable=False, index=True
-    )  # Foreign key to users table in auth-service
+        String(36), nullable=False, index=True
+    )  # Foreign key to users table in auth-service (UUID as string)
     assigned_to = Column(
-        Integer, nullable=True, index=True
-    )  # Foreign key to users table in auth-service (optional)
+        String(36), nullable=True, index=True
+    )  # Foreign key to users table in auth-service (UUID as string, optional)
 
     # Automatic timestamps for auditing
     created_at = Column(DateTime, default=func.now(), nullable=False)

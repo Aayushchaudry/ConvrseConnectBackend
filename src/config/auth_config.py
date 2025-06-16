@@ -118,10 +118,10 @@ class AuthConfigByEnvironment:
     def get_development_config() -> AuthConfig:
         """Development environment configuration"""
         return AuthConfig(
-            auth_service_url=os.getenv("AUTH_AUTH_SERVICE_URL", "http://localhost:8001"),
+            auth_service_url=os.getenv("AUTH_AUTH_SERVICE_URL", "http://auth-service:8000"),
             auth_service_token=os.getenv("AUTH_AUTH_SERVICE_TOKEN", "dev-auth-service-token"),
             jwt_secret_key=os.getenv("AUTH_JWT_SECRET_KEY", "dev-jwt-secret-key-at-least-32-chars-long"),
-            redis_url=os.getenv("AUTH_REDIS_URL", "redis://localhost:6379/0"),
+            redis_url=os.getenv("AUTH_REDIS_URL", "redis://redis:6379/0"),
             auth_service_timeout=10,
             token_cache_ttl=60,  # Shorter cache for development
             rate_limit_requests_per_minute=1000,  # Higher limit for development
@@ -161,7 +161,7 @@ def get_auth_config() -> AuthConfig:
         if env == "test":
             # Special test configuration with relaxed validation
             auth_config = AuthConfig(
-                auth_service_url=os.getenv("AUTH_SERVICE_URL", "http://localhost:8001"),
+                auth_service_url=os.getenv("AUTH_SERVICE_URL", "http://auth-service:8000"),
                 auth_service_token=os.getenv(
                     "AUTH_SERVICE_TOKEN", "test-auth-service-token"
                 ),
@@ -202,23 +202,23 @@ class AuthEndpoints:
 
     @property
     def validate_token(self) -> str:
-        return f"{self.base_url}/api/auth/integration/validate-token"
+        return f"{self.base_url}/integration/validate-token"
 
     @property
     def get_user(self) -> str:
-        return f"{self.base_url}/api/auth/users/me"
+        return f"{self.base_url}/users/me"
 
     @property
     def get_user_businesses(self) -> str:
-        return f"{self.base_url}/api/auth/users/me/businesses"
+        return f"{self.base_url}/users/me/businesses"
 
     @property
     def check_permissions(self) -> str:
-        return f"{self.base_url}/api/auth/integration/check-permission"
+        return f"{self.base_url}/integration/check-permission"
 
     @property
     def log_activity(self) -> str:
-        return f"{self.base_url}/api/auth/integration/log-activity"
+        return f"{self.base_url}/integration/log-activity"
 
     @property
     def health(self) -> str:

@@ -282,6 +282,7 @@ class AuthServiceClient:
                 "POST", self.endpoints.validate_token, data={"token": token}
             )
 
+            # If we get here, the token is valid (200 OK)
             user_data = UserData.from_dict(response["user"])
 
             # Cache the result
@@ -291,8 +292,20 @@ class AuthServiceClient:
             return user_data
 
         except Exception as e:
+            # Check if this is an HTTP error with specific status codes
+            if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                if e.response.status_code == 401:
+                    logger.warning(f"Token validation failed - invalid or expired token")
+                    raise TokenValidationError("Invalid or expired token")
+                elif e.response.status_code == 404:
+                    logger.warning(f"Token validation failed - user not found")
+                    raise AuthServiceError("User not found")
+                elif e.response.status_code >= 500:
+                    logger.error(f"Auth service error during token validation: {e}")
+                    raise AuthServiceError("Authentication service error")
+            
             logger.error(f"Token validation failed: {e}")
-            raise
+            raise TokenValidationError("Token validation failed")
 
     async def get_user_data(self, user_id: int) -> UserData:
         """Get user data by user ID"""

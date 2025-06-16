@@ -250,3 +250,22 @@ async def update_deliverable_status(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update deliverable status: {str(e)}",
         )
+
+
+# Add endpoint to get available deliverable types
+@router.get("/deliverable-types/", response_model=List[dict])
+async def get_deliverable_types():
+    """
+    Get all available deliverable types.
+    Returns a list of deliverable types with their values and labels.
+    """
+    deliverable_types = []
+    for deliverable_type in DeliverableType:
+        # Convert enum value to a more readable label
+        label = deliverable_type.value.replace('_', ' ').title()
+        deliverable_types.append({
+            "value": deliverable_type.value,
+            "label": label
+        })
+    
+    return deliverable_types

@@ -38,6 +38,8 @@ class CreateProjectRequest(BaseModel):
     budget: float = Field(..., gt=0, description="Total budget for the project")
     start_date: date = Field(..., description="Project start date (YYYY-MM-DD)")
     end_date: date = Field(..., description="Project end date (YYYY-MM-DD)")
+    business_id: Optional[int] = Field(None, description="Target business ID (for convrse platform users creating projects for clients)")
+    assigned_to: Optional[str] = Field(None, description="User ID (UUID) of the project manager assigned to this project")
 
     # Example of optional fields if you want to include them in creation
     # payment_option: Optional[str] = Field(None, description="Chosen payment option for the project")
@@ -92,10 +94,9 @@ async def create_project(
             budget=project_data.budget,
             start_date=project_data.start_date.isoformat(),  # Convert date to ISO string
             end_date=project_data.end_date.isoformat(),  # Convert date to ISO string
-            business_id=auth_context.business_id
-            or 1,  # Use business_id from auth, fallback to 1 for tests
-            created_by=auth_context.user_id
-            or 1,  # Use user_id from auth, fallback to 1 for tests
+            business_id=project_data.business_id or auth_context.business_id or 1,  # Use business_id from auth, fallback to 1 for tests
+            created_by=auth_context.user_id or "default-user-id",  # Use user_id from auth, fallback for tests
+            assigned_to=project_data.assigned_to,  # Project manager user ID (UUID)
         )
 
         # Return the created project (Pydantic will automatically convert ORM model)

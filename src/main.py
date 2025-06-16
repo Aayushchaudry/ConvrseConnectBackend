@@ -45,6 +45,7 @@ from src.listeners.review_management_listener import (
 
 # --- AUTH INTEGRATION IMPORTS ---
 from src.middleware.auth_middleware import AuthenticationMiddleware
+from src.middleware.cors_middleware import DynamicCORSMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,16 @@ app = FastAPI(
     debug=settings.DEBUG,
     version="0.1.0",
     lifespan=lifespan,  # Attach the lifespan context manager
+)
+
+# Add CORS middleware with dynamic subdomain support
+app.add_middleware(
+    DynamicCORSMiddleware,
+    allowed_origins=settings.allowed_origins_list,
+    allowed_domain_patterns=settings.allowed_domain_patterns_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Add authentication middleware

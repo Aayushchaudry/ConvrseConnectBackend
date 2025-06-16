@@ -41,7 +41,8 @@ class ProjectService:
         start_date: str,
         end_date: str,
         business_id: int,
-        created_by: int,
+        created_by: str,
+        assigned_to: Optional[str] = None,
     ) -> Project:
         """
         Creates a new project in the database and publishes a ProjectCreatedEvent.
@@ -52,7 +53,8 @@ class ProjectService:
             start_date (str): The project's start date (as string, will be parsed).
             end_date (str): The project's end date (as string, will be parsed).
             business_id (int): The business ID that owns this project.
-            created_by (int): The user ID who created this project.
+            created_by (str): The user ID (UUID) who created this project.
+            assigned_to (Optional[str]): The user ID (UUID) of the project manager assigned to this project.
 
         Returns:
             Project: The newly created Project ORM object.
@@ -77,6 +79,7 @@ class ProjectService:
             end_date=parsed_end_date,
             business_id=business_id,
             created_by=created_by,
+            assigned_to=assigned_to,
             status=ProjectStatus.INITIATED,
         )
 

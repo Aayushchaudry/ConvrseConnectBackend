@@ -39,9 +39,25 @@ class Settings(BaseSettings):
     SAGA_RETRY_ATTEMPTS: int = 5
     SAGA_RETRY_DELAY_SECONDS: int = 5
 
+    # CORS settings - Dynamic subdomain support
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8000,http://localhost:8001"
+    
+    # Domain patterns for dynamic CORS validation
+    ALLOWED_DOMAIN_PATTERNS: str = "localhost,convrse.com,convrse.local"
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).parent.parent.parent / ".env", extra="ignore"
     )
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        """Convert comma-separated origins to list"""
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
+    
+    @property
+    def allowed_domain_patterns_list(self) -> list[str]:
+        """Convert comma-separated domain patterns to list"""
+        return [pattern.strip() for pattern in self.ALLOWED_DOMAIN_PATTERNS.split(",")]
 
 
 settings = Settings()
