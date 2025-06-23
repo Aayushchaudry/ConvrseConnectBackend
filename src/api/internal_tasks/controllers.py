@@ -1,7 +1,7 @@
 # src/api/internal_tasks/controllers.py
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -13,9 +13,17 @@ from src.config.event_bus import get_event_bus
 from src.events.event_bus_interface import EventBus
 from src.models.internal_task import Priority, TaskStatus, TaskType
 from src.services.production_management_service import ProductionManagementService
+from src.events.task_events import InternalTaskCompletedEvent, InternalTaskCompletedWithMediaEvent
 from src.middleware.auth_middleware import require_auth
 
-router = APIRouter(prefix="/internal-tasks", tags=["Internal Tasks"])
+import logging
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/internal-tasks",
+    tags=["Internal Tasks"],
+    redirect_slashes=False,  # Prevent automatic redirects
+)
 
 
 # --- Pydantic Schema for Request Body ---
@@ -64,6 +72,17 @@ class UpdateProjectTaskRequest(BaseModel):
     Schema for updating project-level task status.
     """
     status: str = Field(..., pattern="^(todo|in-progress|done)$", description="New task status")
+
+
+class CompleteTaskWithMediaRequest(BaseModel):
+    """
+    Schema for completing a task with optional media files.
+    Supports both UUID strings and integer IDs during transition period.
+    """
+    file_ids: Optional[List[Union[str, int]]] = Field(
+        default=None, 
+        description="Optional list of platform-service file IDs (UUID strings or integers)"
+    )
 
 
 # --- Pydantic Schema for Response Body (Internal Task Details) ---
@@ -132,17 +151,13 @@ async def get_project_tasks(
     auth_context = require_auth(request)
     
     try:
-        from sqlalchemy import select, and_
+        from sqlalchemy import select
         from src.models.internal_task import InternalTask
         
-        # Query project-level tasks (those with task_type="OTHER" and no specific deliverable requirement)
-        # For now, we'll get all tasks for the project, but you could filter by task_type=OTHER
+        # Query all tasks for the project (not just OTHER type)
         result = await db_session.execute(
             select(InternalTask).filter(
-                and_(
-                    InternalTask.project_id == project_id,
-                    InternalTask.task_type == TaskType.OTHER  # Only general project tasks
-                )
+                InternalTask.project_id == project_id
             ).order_by(InternalTask.created_at.desc())
         )
         tasks = result.scalars().all()
@@ -161,8 +176,7 @@ async def get_project_tasks(
         return simplified_tasks
         
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
+        
         logger.error(f"Error fetching project tasks: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -217,8 +231,7 @@ async def create_project_task(
         )
 
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
+        
         logger.error(f"Error creating project task: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -233,6 +246,7 @@ async def update_project_task_status(
     update_data: UpdateProjectTaskRequest,
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),
+    event_bus: EventBus = Depends(get_event_bus),
 ):
     """
     Update the status of a project-level task.
@@ -243,14 +257,15 @@ async def update_project_task_status(
     try:
         from sqlalchemy import select, and_
         from src.models.internal_task import InternalTask
+        from src.events.task_events import InternalTaskCompletedEvent, InternalTaskStatusUpdatedEvent
+        from src.services.production_management_service import ProductionManagementService
         
-        # Get the task
+        # Get the task (any task type for the project)
         result = await db_session.execute(
             select(InternalTask).filter(
                 and_(
                     InternalTask.id == task_id,
-                    InternalTask.project_id == project_id,
-                    InternalTask.task_type == TaskType.OTHER
+                    InternalTask.project_id == project_id
                 )
             )
         )
@@ -261,6 +276,8 @@ async def update_project_task_status(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Task not found"
             )
+        
+        old_status = task.status
         
         # Update the status
         task.status = map_frontend_status_to_task_status(update_data.status)
@@ -274,6 +291,51 @@ async def update_project_task_status(
         await db_session.commit()
         await db_session.refresh(task)
         
+        # Publish status update event for all status changes (including to in-progress)
+        if old_status != task.status:
+            try:
+                status_update_event = InternalTaskStatusUpdatedEvent(
+                    project_id=task.project_id,
+                    deliverable_id=task.deliverable_id,
+                    task_id=task.id,
+                    old_status=old_status.value,
+                    new_status=task.status.value,
+                )
+                
+                await event_bus.publish(
+                    topic="internal_task.status.updated",
+                    message=status_update_event.__dict__,
+                )
+                
+                logger.info(f"Published InternalTaskStatusUpdatedEvent for task {task_id}: {old_status.value} -> {task.status.value}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to publish task status update event: {e}")
+                # Don't fail the request if event publishing fails
+        
+        # If task was marked as done, publish completion event to trigger review item creation
+        if update_data.status == "done" and old_status != task.status:
+            try:
+                # Publish InternalTaskCompletedEvent to trigger orchestrator
+                completion_event = InternalTaskCompletedEvent(
+                    project_id=task.project_id,
+                    deliverable_id=task.deliverable_id,
+                    task_id=task.id,
+                    task_name=task.task_name,
+                    task_type=task.task_type.value if hasattr(task.task_type, 'value') else str(task.task_type),
+                )
+                
+                await event_bus.publish(
+                    topic="internal_task.completed",
+                    message=completion_event.__dict__,
+                )
+                
+                logger.info(f"Published InternalTaskCompletedEvent for task {task_id}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to publish task completion event: {e}")
+                # Don't fail the request if event publishing fails
+        
         # Return simplified response
         return ProjectTaskResponse(
             id=str(task.id),
@@ -286,8 +348,7 @@ async def update_project_task_status(
     except HTTPException:
         raise
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
+        
         logger.error(f"Error updating project task: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -312,13 +373,12 @@ async def delete_project_task(
         from sqlalchemy import select, and_
         from src.models.internal_task import InternalTask
         
-        # Get the task
+        # Get the task (any task type for the project)
         result = await db_session.execute(
             select(InternalTask).filter(
                 and_(
                     InternalTask.id == task_id,
-                    InternalTask.project_id == project_id,
-                    InternalTask.task_type == TaskType.OTHER
+                    InternalTask.project_id == project_id
                 )
             )
         )
@@ -336,8 +396,7 @@ async def delete_project_task(
     except HTTPException:
         raise
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
+        
         logger.error(f"Error deleting project task: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -346,6 +405,59 @@ async def delete_project_task(
 
 
 # --- EXISTING API Endpoints (keeping for production tasks) ---
+
+@router.get(
+    "/", response_model=List[InternalTaskResponse]
+)
+async def list_internal_tasks(
+    request: Request,
+    project_id: Optional[UUID] = None,
+    deliverable_id: Optional[UUID] = None,
+    status: Optional[TaskStatus] = None,
+    task_type: Optional[TaskType] = None,
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Get a list of internal tasks with optional filtering.
+    """
+    # Get auth context
+    auth_context = require_auth(request)
+    
+    try:
+        from sqlalchemy import select, and_
+        from src.models.internal_task import InternalTask
+        
+        # Build query conditions
+        conditions = []
+        if project_id:
+            conditions.append(InternalTask.project_id == project_id)
+        if deliverable_id:
+            conditions.append(InternalTask.deliverable_id == deliverable_id)
+        if status:
+            conditions.append(InternalTask.status == status)
+        if task_type:
+            conditions.append(InternalTask.task_type == task_type)
+        
+        # Execute query
+        if conditions:
+            result = await db_session.execute(
+                select(InternalTask).filter(and_(*conditions)).order_by(InternalTask.created_at.desc())
+            )
+        else:
+            result = await db_session.execute(
+                select(InternalTask).order_by(InternalTask.created_at.desc())
+            )
+        
+        tasks = result.scalars().all()
+        return tasks
+        
+    except Exception as e:
+        
+        logger.error(f"Error fetching internal tasks: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch internal tasks: {str(e)}"
+        )
 
 @router.post(
     "/", response_model=InternalTaskResponse, status_code=status.HTTP_201_CREATED
@@ -385,9 +497,7 @@ async def create_internal_task(
         return task
 
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
+        
         logger.error(f"Error creating internal task: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -398,32 +508,88 @@ async def create_internal_task(
 @router.post("/{task_id}/complete", response_model=InternalTaskResponse)
 async def complete_internal_task_api(
     task_id: UUID,
+    request_data: CompleteTaskWithMediaRequest = CompleteTaskWithMediaRequest(),
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
 ):
     """
-    API endpoint to manually mark an internal task as complete.
-    For testing purposes to trigger the SAGA's next phase.
+    API endpoint to mark an internal task as complete, optionally with media files.
+    If file_ids are provided, creates multiple review items (one per file).
+    If no file_ids, creates a single review item without files.
     """
     try:
-        production_service = ProductionManagementService(
-            db_session_factory=lambda: db_session, event_bus=event_bus
+        # Get the task using direct database query
+        from sqlalchemy import select
+        from src.models.internal_task import InternalTask
+        
+        result = await db_session.execute(
+            select(InternalTask).filter(InternalTask.id == task_id)
         )
-        completed_task = await production_service.complete_internal_task(
-            task_id=task_id, actual_end_date=datetime.utcnow()
-        )
-        return completed_task
-    except ValueError as ve:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(ve))
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        # Update task status and completion date
+        task.status = TaskStatus.DONE
+        task.actual_end_date = datetime.utcnow()
+        
+        # Commit the task update
+        await db_session.commit()
+        await db_session.refresh(task)
+        
+        # Convert file_ids to UUIDs if provided
+        file_uuids = []
+        if request_data.file_ids:
+            for file_id in request_data.file_ids:
+                try:
+                    if isinstance(file_id, str):
+                        file_uuids.append(UUID(file_id))
+                    else:
+                        file_uuids.append(file_id)
+                except ValueError:
+                    logger.warning(f"Invalid file ID format: {file_id}")
+                    continue
+        
+        # Publish appropriate event based on whether files are provided
+        if file_uuids:
+            # Create event with media files
+            event = InternalTaskCompletedWithMediaEvent(
+                task_id=task_id,
+                project_id=task.project_id,
+                deliverable_id=task.deliverable_id,
+                task_name=task.task_name,
+                task_type=task.task_type.value if hasattr(task.task_type, 'value') else str(task.task_type),
+                platform_file_ids=file_uuids,
+                timestamp=datetime.utcnow()
+            )
+            await event_bus.publish(
+                topic="internal_task.completed",
+                message=event.__dict__,
+            )
+            logger.info(f"Publishing InternalTaskCompletedWithMediaEvent for task {task_id} with {len(file_uuids)} files")
+        else:
+            # Create event without media files
+            event = InternalTaskCompletedEvent(
+                task_id=task_id,
+                project_id=task.project_id,
+                deliverable_id=task.deliverable_id,
+                task_name=task.task_name,
+                task_type=task.task_type.value if hasattr(task.task_type, 'value') else str(task.task_type),
+                timestamp=datetime.utcnow()
+            )
+            await event_bus.publish(
+                topic="internal_task.completed",
+                message=event.__dict__,
+            )
+            logger.info(f"Publishing InternalTaskCompletedEvent for task {task_id} (no files)")
+        
+        return InternalTaskResponse.from_orm(task)
+        
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error completing internal task {task_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to complete task: {str(e)}",
-        )
+        logger.error(f"Error completing task {task_id}: {str(e)}")
+        await db_session.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to complete task: {str(e)}")
 
 
 @router.get(

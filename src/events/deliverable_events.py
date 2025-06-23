@@ -94,12 +94,34 @@ class DeliverableInfoGatheringFailedEvent(BaseEvent):
         deliverable_id: UUID,
         reason: str,
         error_details: Optional[Dict[str, Any]] = None,
+        event_id: UUID = None,
+        timestamp: datetime = None,
+        event_type: str = None,
     ):
-        super().__init__(
-            event_id=uuid.uuid4(),
-            timestamp=datetime.utcnow(),
-            event_type="DeliverableInfoGatheringFailedEvent",
-        )
+        # Allow event_id and timestamp to be passed for deserialization
+        if event_id is None:
+            event_id = uuid.uuid4()
+        elif isinstance(event_id, str):
+            event_id = UUID(event_id)
+
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+        elif isinstance(timestamp, str):
+            # Parse ISO format timestamp from Kafka
+            timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+        if event_type is None:
+            event_type = "DeliverableInfoGatheringFailedEvent"
+
+        # Convert project_id to UUID if it's a string
+        if isinstance(project_id, str):
+            project_id = UUID(project_id)
+
+        # Convert deliverable_id to UUID if it's a string (handle None case)
+        if deliverable_id is not None and isinstance(deliverable_id, str):
+            deliverable_id = UUID(deliverable_id)
+
+        super().__init__(event_id=event_id, timestamp=timestamp, event_type=event_type)
         self.project_id = project_id
         self.deliverable_id = deliverable_id
         self.reason = reason

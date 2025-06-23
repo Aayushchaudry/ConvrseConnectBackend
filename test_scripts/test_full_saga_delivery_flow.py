@@ -200,7 +200,7 @@ class FullSagaDeliveryFlowTest:
                     item_type=ReviewItemType.STATIC_RENDER,
                     item_url="http://example.com/final_approved_render.jpg",
                     description="Final draft for client approval",
-                    review_status=ReviewStatus.PENDING
+                    review_status=ReviewStatus.PENDING_REVIEW
                 )
                 session.add(review_item)
                 

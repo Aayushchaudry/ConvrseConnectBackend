@@ -56,6 +56,7 @@ class UserData:
     is_active: bool
     businesses: List[Dict[str, Any]]
     permissions: List[str]
+    business_id: Optional[str] = None  # Direct business ID for single-business users
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "UserData":
@@ -67,6 +68,7 @@ class UserData:
             is_active=data.get("is_active", True),
             businesses=data.get("businesses", []),
             permissions=data.get("permissions", []),
+            business_id=data.get("business_id"),  # Include direct business_id
         )
 
 
@@ -420,6 +422,56 @@ class AuthServiceClient:
         except Exception as e:
             # Don't fail the main operation if activity logging fails
             logger.error(f"Activity logging failed: {e}")
+
+    async def check_user_permission(self, user_id: str, permission: str, auth_token: str = None) -> bool:
+        """
+        Check if user has specific permission using user's token.
+        
+        Args:
+            user_id: User ID to check
+            permission: Permission string to check
+            auth_token: User's JWT token for authentication
+            
+        Returns:
+            True if user has permission, False otherwise
+        """
+        try:
+            # Prepare headers with user's token
+            headers = {
+                "Content-Type": "application/json",
+                "X-Service-Name": "convrse-connect-backend",
+            }
+            
+            if auth_token:
+                headers["Authorization"] = f"Bearer {auth_token}"
+            else:
+                # Fallback to service token
+                headers["Authorization"] = f"Bearer {self.config.auth_service_token}"
+            
+            # Make request with user's token
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self.config.auth_service_timeout)) as client:
+                response = await client.post(
+                    f"{self.config.auth_service_url}/integration/check-permission",
+                    json={"user_id": user_id, "permission": permission},
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get("has_permission", False)
+                elif response.status_code == 401:
+                    raise TokenValidationError("Invalid or expired token")
+                elif response.status_code == 403:
+                    return False  # No permission
+                else:
+                    logger.warning(f"Unexpected response from permission check: {response.status_code}")
+                    return False
+                    
+        except TokenValidationError:
+            raise
+        except Exception as e:
+            logger.error(f"Permission check failed for user {user_id}, permission {permission}: {e}")
+            return False
 
     async def health_check(self) -> bool:
         """Check auth service health"""

@@ -16,18 +16,18 @@ from src.config.database import Base  # Import Base from your database config
 class SagaStatus(enum.Enum):
     """Overall status of a SAGA instance."""
 
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    COMPENSATING = "compensating"  # When undoing previous steps due to failure
-    CANCELED = "canceled"  # Manually canceled
+    STARTED = "STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    COMPENSATING = "COMPENSATING"  # When undoing previous steps due to failure
 
 
 class SagaType(enum.Enum):
     """Type of SAGA, distinguishing between Project and Deliverable level."""
 
-    PROJECT_LIFECYCLE = "project_lifecycle"
-    DELIVERABLE_PRODUCTION = "deliverable_production"
+    PROJECT_LIFECYCLE = "PROJECT_LIFECYCLE"
+    DELIVERABLE_PRODUCTION = "DELIVERABLE_PRODUCTION"
 
 
 # --- SagaState ORM Model ---
@@ -40,6 +40,7 @@ class SagaState(Base):
     """
 
     __tablename__ = "saga_state"  # This defines the table name in the database
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
@@ -47,11 +48,11 @@ class SagaState(Base):
     saga_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
 
     # Classifies the type of SAGA instance
-    saga_type = Column(Enum(SagaType), nullable=False)
+    saga_type = Column(Enum(SagaType, schema="connect_backend"), nullable=False)
 
     # Foreign Keys linking to the entities this SAGA is orchestrating
     # project_id is always present
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False)
     # deliverable_id is nullable because the Project SAGA doesn't have one
     # TODO: Uncomment when deliverables table is created
     # deliverable_id = Column(UUID(as_uuid=True), ForeignKey('deliverables.id'), nullable=True)
@@ -65,7 +66,7 @@ class SagaState(Base):
     )  # e.g., 'INFO_GATHERING', 'AWAITING_CLIENT_REVIEW_RENDER'
 
     # Overall status of the SAGA instance
-    status = Column(Enum(SagaStatus), default=SagaStatus.IN_PROGRESS, nullable=False)
+    status = Column(Enum(SagaStatus, schema="connect_backend"), default=SagaStatus.IN_PROGRESS, nullable=False)
 
     # Tracking for idempotency and recovery in event processing
     last_event_processed_id = Column(

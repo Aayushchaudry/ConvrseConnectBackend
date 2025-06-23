@@ -21,21 +21,19 @@ from src.models.project import (
 class RequirementType(enum.Enum):
     """Defines the type of data expected for a requirement."""
 
-    FILE_UPLOAD = "file_upload"
-    TEXT_INPUT = "text_input"
-    BOOLEAN_INPUT = "boolean_input"
-    JSON_INPUT = "json_input"  # For complex structured data like highlights list
+    FILE_UPLOAD = "FILE_UPLOAD"
+    TEXT_INPUT = "TEXT_INPUT"
+    BOOLEAN_INPUT = "BOOLEAN_INPUT"
+    JSON_INPUT = "JSON_INPUT"  # For complex structured data like highlights list
 
 
 class RequirementStatus(enum.Enum):
-    """Defines the status of a specific requirement."""
+    """Defines the status of a requirement."""
 
-    PENDING = "pending"  # Waiting for client/internal team to provide
-    RECEIVED = "received"  # Data/file has been provided
-    APPROVED = "approved"  # Client has approved this specific requirement (e.g., a specific material choice)
-    NOT_APPLICABLE = (
-        "not_applicable"  # This requirement does not apply to this deliverable instance
-    )
+    PENDING = "PENDING"
+    RECEIVED = "RECEIVED"
+    APPROVED = "APPROVED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
 # --- Requirement ORM Model ---
@@ -48,22 +46,23 @@ class Requirement(Base):
     """
 
     __tablename__ = "requirements"
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # Foreign Keys linking to the Deliverable and Project
     deliverable_id = Column(
-        UUID(as_uuid=True), ForeignKey("deliverables.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.deliverables.id"), nullable=False
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False
     )  # For convenience in queries
 
     # Name of the requirement (e.g., 'Floor Plan Cad File', 'Theme/Mood Board')
     requirement_name = Column(String(255), nullable=False)
 
     # Type of data expected for this requirement
-    requirement_type = Column(Enum(RequirementType), nullable=False)
+    requirement_type = Column(Enum(RequirementType, schema="connect_backend"), nullable=False)
 
     # Value for non-file requirements (e.g., 'Yes' for boolean, JSON string for structured data)
     value = Column(
@@ -72,7 +71,7 @@ class Requirement(Base):
 
     # Status of this specific requirement
     status = Column(
-        Enum(RequirementStatus), default=RequirementStatus.PENDING, nullable=False
+        Enum(RequirementStatus, schema="connect_backend"), default=RequirementStatus.PENDING, nullable=False
     )
 
     # Indicates if this requirement is critical for the deliverable

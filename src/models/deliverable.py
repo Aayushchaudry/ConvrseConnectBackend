@@ -4,7 +4,7 @@ import enum
 import uuid
 
 from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ENUM
 from sqlalchemy.orm import relationship  # To define relationships with other models
 
 from src.config.database import Base  # Import Base from your database config
@@ -55,22 +55,32 @@ class Deliverable(Base):
     """
 
     __tablename__ = "deliverables"
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # Foreign Key linking to the Project
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False)
 
     # Type of deliverable (e.g., Rendered Images, VR Tour)
-    deliverable_type = Column(Enum(DeliverableType), nullable=False)
+    deliverable_type = Column(
+        ENUM("rendered_images", "technical_renders", "exterior_vr_tour", "animated_vr_tour", 
+             "video_walkthrough", "inventory_module", "location_map", "interactive_sales_app", 
+             "interactive_drone_shoot", "interplayer_software_av_room", 
+             name="deliverabletype", schema="connect_backend"), 
+        nullable=False
+    )
 
     # Sub-type if applicable (e.g., 'Interior Requirement', 'Exterior Requirement')
     deliverable_sub_type = Column(String(100), nullable=True)
 
     # Status of this specific deliverable within its lifecycle
     current_status = Column(
-        Enum(DeliverableStatus),
-        default=DeliverableStatus.INFO_GATHERING,
+        ENUM("info_gathering", "modeling_pending", "texturing_pending", "rendering_pending", 
+             "awaiting_client_review", "revisions_in_progress", "ready_for_delivery", 
+             "delivered", "failed", "canceled", 
+             name="deliverablestatus", schema="connect_backend"), 
+        default="info_gathering",
         nullable=False,
     )
 
@@ -80,11 +90,11 @@ class Deliverable(Base):
     # --- AUTH INTEGRATION FIELDS ---
     # User context - who is assigned to and who created this deliverable
     assigned_to = Column(
-        Integer, nullable=True, index=True
-    )  # Foreign key to users table in auth-service
+        UUID(as_uuid=True), nullable=True, index=True
+    )  # Foreign key to users table in auth-service (proper UUID)
     created_by = Column(
-        Integer, nullable=False, index=True
-    )  # Foreign key to users table in auth-service
+        UUID(as_uuid=True), nullable=False, index=True
+    )  # Foreign key to users table in auth-service (proper UUID)
 
     # Automatic timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)

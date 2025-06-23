@@ -3,7 +3,7 @@
 import uuid  # For uuid.uuid4()
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 
@@ -114,6 +114,87 @@ class InternalTaskCompletedEvent(BaseEvent):
         self.task_id = task_id
         self.task_name = task_name
         self.task_type = task_type
+
+
+@dataclass
+class InternalTaskCompletedWithMediaEvent(BaseEvent):
+    """
+    Event published when an internal production task has been completed with media files.
+    Published by: Task Completion API
+    Consumed by: Deliverable SAGA Orchestrator (to create multiple review items with file references)
+    """
+
+    project_id: UUID
+    deliverable_id: UUID
+    task_id: UUID
+    task_name: str
+    task_type: str
+    platform_file_ids: List[UUID]  # List of file UUIDs from platform-service (updated from int to UUID)
+
+    def __init__(
+        self,
+        project_id: UUID,
+        deliverable_id: UUID,
+        task_id: UUID,
+        task_name: str,
+        task_type: str,
+        platform_file_ids: List[Union[UUID, str]],  # Accept both UUID and string for flexibility
+        event_id: UUID = None,
+        timestamp: datetime = None,
+        event_type: str = None,
+    ):
+        # Allow event_id and timestamp to be passed for deserialization
+        if event_id is None:
+            event_id = uuid.uuid4()
+        elif isinstance(event_id, str):
+            event_id = UUID(event_id)
+
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+        elif isinstance(timestamp, str):
+            # Parse ISO format timestamp from Kafka
+            timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+        if event_type is None:
+            event_type = "InternalTaskCompletedWithMediaEvent"
+
+        # Convert UUIDs from strings if needed
+        if isinstance(project_id, str):
+            project_id = UUID(project_id)
+        if isinstance(deliverable_id, str):
+            deliverable_id = UUID(deliverable_id)
+        if isinstance(task_id, str):
+            task_id = UUID(task_id)
+
+        # Convert platform_file_ids to UUIDs
+        converted_file_ids = []
+        for file_id in platform_file_ids:
+            if isinstance(file_id, str):
+                try:
+                    converted_file_ids.append(UUID(file_id))
+                except ValueError:
+                    # If string is not a valid UUID, it might be an integer ID
+                    # During transition period, convert int to UUID using deterministic method
+                    import uuid as uuid_lib
+                    namespace = uuid_lib.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
+                    converted_file_ids.append(uuid_lib.uuid5(namespace, f"content_id_{file_id}"))
+            elif isinstance(file_id, int):
+                # Convert integer ID to UUID using deterministic method (transition period)
+                import uuid as uuid_lib
+                namespace = uuid_lib.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
+                converted_file_ids.append(uuid_lib.uuid5(namespace, f"content_id_{file_id}"))
+            elif isinstance(file_id, UUID):
+                converted_file_ids.append(file_id)
+            else:
+                raise ValueError(f"Invalid file_id type: {type(file_id)}")
+
+        super().__init__(event_id=event_id, timestamp=timestamp, event_type=event_type)
+        self.project_id = project_id
+        self.deliverable_id = deliverable_id
+        self.task_id = task_id
+        self.task_name = task_name
+        self.task_type = task_type
+        self.platform_file_ids = converted_file_ids
 
 
 @dataclass

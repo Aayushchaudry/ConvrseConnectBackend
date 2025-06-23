@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Optional, Type
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
 
 from src.commands.project_commands import (
     StartDeliverableSagaCommand,
@@ -21,7 +22,13 @@ from src.events.project_events import (
     ProjectCreatedEvent,
     ProjectFailedEvent,
 )
-from src.models.project import ProjectStatus  # Already imported
+from src.events.task_events import (
+    InternalTaskCompletedEvent,
+    InternalTaskCompletedWithMediaEvent,
+    InternalTaskStatusUpdatedEvent,
+)
+from src.events.deliverable_events import RequirementUpdatedEvent
+from src.models.project import Project, ProjectStatus  # Already imported
 from src.models.saga_state import SagaState, SagaStatus, SagaType
 from src.orchestrators.project_lifecycle_orchestrator.states import ProjectSagaState
 from src.orchestrators.saga_processor import (
@@ -57,6 +64,11 @@ class ProjectLifecycleOrchestrator:
                 "ProjectCreatedEvent": self.on_project_created,
                 "DeliverableDeliveredEvent": self.on_deliverable_delivered,
                 "DeliverableFailedEvent": self.on_deliverable_failed,
+                # Project Status Progression Events
+                "InternalTaskCompletedEvent": self.on_work_progress_made,
+                "InternalTaskCompletedWithMediaEvent": self.on_work_progress_made,
+                "InternalTaskStatusUpdatedEvent": self.on_task_status_updated,
+                "RequirementUpdatedEvent": self.on_requirement_updated,
                 # Add handlers for other events as you define them
             }
         )
@@ -200,7 +212,7 @@ class ProjectLifecycleOrchestrator:
                 saga_state=saga_state,
                 new_state_enum=ProjectSagaState.PROJECT_FAILED,
                 event_id=event.event_id,
-                new_saga_status=SagaStatus.FAILED,  # Mark the saga as FAILED
+                new_saga_status=SagaStatus.FAILED,  # Pass the enum directly, not .value
             )
             logger.info(
                 f"Project SAGA for {event.project_id} transitioned to {ProjectSagaState.PROJECT_FAILED.value} due to Deliverable Failure."
@@ -210,6 +222,104 @@ class ProjectLifecycleOrchestrator:
             # from src.commands.project_commands import NotifyProjectManagerCommand
             # command = NotifyProjectManagerCommand(project_id=event.project_id, message=f"Deliverable {event.deliverable_name} failed. Reason: {event.reason}")
             # await self.saga_processor.publish_message(topic="notification.command.pm", message_payload=command)
+
+    async def on_work_progress_made(self, event):
+        """
+        Handles task completion events (InternalTaskCompletedEvent or InternalTaskCompletedWithMediaEvent).
+        When any task is completed, it indicates work has begun and project should move from 'initiated' to 'in_progress'.
+        """
+        project_id = event.project_id
+        logger.info(
+            f"ProjectLifecycleOrchestrator: Received task completion event for Project {project_id}. Checking if project status should progress."
+        )
+
+        await self._progress_project_from_initiated_to_in_progress(project_id, f"Task {event.task_id} completed")
+
+    async def on_task_status_updated(self, event: InternalTaskStatusUpdatedEvent):
+        """
+        Handles task status updates. When a task moves to 'in-progress', it indicates work has begun.
+        """
+        project_id = event.project_id
+        
+        # Only trigger progression if task is now in-progress (work actually started)
+        if event.new_status.lower() in ['in-progress', 'in_progress']:
+            logger.info(
+                f"ProjectLifecycleOrchestrator: Task {event.task_id} moved to in-progress for Project {project_id}. Checking if project status should progress."
+            )
+            await self._progress_project_from_initiated_to_in_progress(project_id, f"Task {event.task_id} started (in-progress)")
+
+    async def on_requirement_updated(self, event: RequirementUpdatedEvent):
+        """
+        Handles requirement status updates. When a requirement is completed/approved, it indicates progress.
+        """
+        project_id = event.project_id
+        
+        # Only trigger progression if requirement is now done/completed
+        if event.new_status.lower() in ['received', 'approved']:
+            logger.info(
+                f"ProjectLifecycleOrchestrator: Requirement {event.requirement_id} marked as {event.new_status} for Project {project_id}. Checking if project status should progress."
+            )
+            await self._progress_project_from_initiated_to_in_progress(project_id, f"Requirement {event.requirement_id} completed ({event.new_status})")
+
+    async def _progress_project_from_initiated_to_in_progress(self, project_id: UUID, reason: str):
+        """
+        Helper method to progress a project from 'initiated' to 'in_progress' if it's currently in 'initiated' status.
+        Only updates if the project is currently in 'initiated' status to avoid unnecessary updates.
+        """
+        async with self.db_session_factory() as session:
+            try:
+                # Get current project status
+                result = await session.execute(
+                    select(Project).filter(Project.id == project_id)
+                )
+                project = result.scalar_one_or_none()
+                
+                if not project:
+                    logger.warning(f"Project {project_id} not found for status progression")
+                    return
+                
+                # Only progress if currently in 'initiated' status
+                if project.status == ProjectStatus.INITIATED:
+                    logger.info(
+                        f"ProjectLifecycleOrchestrator: Progressing Project {project_id} from 'initiated' to 'in_progress'. Reason: {reason}"
+                    )
+                    
+                    # Update project status to in_progress
+                    await session.execute(
+                        update(Project)
+                        .where(Project.id == project_id)
+                        .values(
+                            status=ProjectStatus.IN_PROGRESS.value,
+                            updated_at=datetime.utcnow()
+                        )
+                    )
+                    
+                    await session.commit()
+                    
+                    logger.info(
+                        f"ProjectLifecycleOrchestrator: Successfully updated Project {project_id} status to 'in_progress'"
+                    )
+                    
+                    # TODO: Consider publishing a ProjectStatusUpdatedEvent here for other systems to react
+                    # project_status_event = ProjectStatusUpdatedEvent(
+                    #     project_id=project_id,
+                    #     old_status=ProjectStatus.INITIATED.value,
+                    #     new_status=ProjectStatus.IN_PROGRESS.value,
+                    #     reason=reason
+                    # )
+                    # await self.event_bus.publish(topic="project.status.updated", message=project_status_event)
+                    
+                else:
+                    logger.debug(
+                        f"ProjectLifecycleOrchestrator: Project {project_id} is already in '{project.status.value}' status. No progression needed."
+                    )
+                    
+            except Exception as e:
+                logger.error(
+                    f"ProjectLifecycleOrchestrator: Error progressing project {project_id} status: {e}",
+                    exc_info=True
+                )
+                await session.rollback()
 
     # You can add a generic handler for all events if you want a centralized dispatch
     async def handle_event(self, event_data: Dict[str, Any]):

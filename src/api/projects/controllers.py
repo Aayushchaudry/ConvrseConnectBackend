@@ -15,13 +15,21 @@ from src.middleware.auth_middleware import (
     AuthContext,  # Auth dependencies
     require_auth,
 )
+from src.middleware.permissions_middleware import (
+    require_resource_permission, 
+    require_resource_business_permission
+)
 from src.models.project import ProjectStatus  # Import ProjectStatus Enum
 from src.services.project_service import ProjectService  # Import your ProjectService
 
+import logging
+logger = logging.getLogger(__name__)
+        
 # Create a FastAPI APIRouter instance
 router = APIRouter(
     prefix="/projects",  # All endpoints in this router will start with /projects
     tags=["Projects"],  # Tags for API documentation (Swagger UI)
+    redirect_slashes=False,  # Prevent automatic redirects - be explicit about trailing slashes
 )
 
 
@@ -38,7 +46,7 @@ class CreateProjectRequest(BaseModel):
     budget: float = Field(..., gt=0, description="Total budget for the project")
     start_date: date = Field(..., description="Project start date (YYYY-MM-DD)")
     end_date: date = Field(..., description="Project end date (YYYY-MM-DD)")
-    business_id: Optional[int] = Field(None, description="Target business ID (for convrse platform users creating projects for clients)")
+    business_id: Optional[str] = Field(None, description="Target business ID (for convrse platform users creating projects for clients)")
     assigned_to: Optional[str] = Field(None, description="User ID (UUID) of the project manager assigned to this project")
 
     # Example of optional fields if you want to include them in creation
@@ -70,21 +78,38 @@ class ProjectResponse(BaseModel):
 
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)  # Handle both with and without trailing slash
 async def create_project(
     project_data: CreateProjectRequest,
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),  # Inject DB session
     event_bus: EventBus = Depends(get_event_bus),  # Inject Event Bus
+    auth_context: AuthContext = Depends(require_resource_permission("projects", "create")),
 ):
     """
     Creates a new project and initiates the Project Lifecycle SAGA.
+    Requires 'projects.create' permission.
     """
-    # Get auth context from middleware - let auth errors bubble up
-    auth_context = require_auth(request)
 
     try:
+        # Validate the input data
+        logger.info(f"Creating project with data: {project_data}")
+        
         # Create an instance of ProjectService
         project_service = ProjectService(db_session=db_session, event_bus=event_bus)
+
+        # Ensure we have proper fallback values for business_id and created_by
+        business_id = project_data.business_id or auth_context.business_id or "biz_convrse_default"
+        created_by = auth_context.user_id or "default-user-id"
+        
+        # Validate that the business_id and created_by are proper strings
+        if not isinstance(business_id, str) or not business_id.strip():
+            business_id = "biz_convrse_default"
+            
+        if not isinstance(created_by, str) or not created_by.strip():
+            created_by = "default-user-id"
+
+        logger.info(f"Using business_id: {business_id}, created_by: {created_by}")
 
         # Call the service method to create the project and publish the event
         # Convert date objects from Pydantic to string for now, ProjectService expects string based on current code
@@ -94,18 +119,22 @@ async def create_project(
             budget=project_data.budget,
             start_date=project_data.start_date.isoformat(),  # Convert date to ISO string
             end_date=project_data.end_date.isoformat(),  # Convert date to ISO string
-            business_id=project_data.business_id or auth_context.business_id or 1,  # Use business_id from auth, fallback to 1 for tests
-            created_by=auth_context.user_id or "default-user-id",  # Use user_id from auth, fallback for tests
+            business_id=business_id,
+            created_by=created_by,
             assigned_to=project_data.assigned_to,  # Project manager user ID (UUID)
         )
 
         # Return the created project (Pydantic will automatically convert ORM model)
         return created_project
+    except ValueError as ve:
+        # Log the specific validation error
+        logger.error(f"Validation error creating project: {ve}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Validation error: {str(ve)}",
+        )
     except Exception as e:
         # Log the error for debugging
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.error(f"Error creating project: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -119,13 +148,12 @@ async def get_project_details(
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
+    auth_context: AuthContext = Depends(require_resource_permission("projects", "read")),
 ):
     """
     Retrieves details of a specific project by its ID.
-    Requires user to have access to the business that owns the project.
+    Requires 'projects.read' permission and access to the business that owns the project.
     """
-    # Get auth context from middleware - let auth errors bubble up
-    auth_context = require_auth(request)
 
     project_service = ProjectService(db_session=db_session, event_bus=event_bus)
     project = await project_service.get_project_by_id(project_id)
@@ -146,29 +174,37 @@ async def get_project_details(
 
 
 @router.get("/", response_model=list[ProjectResponse])
+@router.get("", response_model=list[ProjectResponse])  # Handle both with and without trailing slash
 async def list_projects(
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
+    auth_context: AuthContext = Depends(require_resource_permission("projects", "read")),
 ):
     """
     Retrieves a list of projects accessible to the authenticated user.
-    Projects are filtered by business access.
+    Requires 'projects.read' permission and filters by business access.
     """
-    # Get auth context from middleware - let auth errors bubble up
-    auth_context = require_auth(request)
+    try:
+        project_service = ProjectService(db_session=db_session, event_bus=event_bus)
+        all_projects = await project_service.get_all_projects()
 
-    project_service = ProjectService(db_session=db_session, event_bus=event_bus)
-    all_projects = await project_service.get_all_projects()
+        # Filter projects by business access - only return projects the user has access to
+        accessible_projects = [
+            project
+            for project in all_projects
+            if auth_context.has_business_access(project.business_id)
+        ]
 
-    # Filter projects by business access
-    accessible_projects = [
-        project
-        for project in all_projects
-        if auth_context.has_business_access(project.business_id)
-    ]
-
-    return accessible_projects
+        return accessible_projects
+        
+    except Exception as e:
+        logger.error(f"Error fetching projects: {e}", exc_info=True)
+        # Don't rollback here - let the dependency handle session lifecycle
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch projects: {str(e)}"
+        )
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
@@ -178,13 +214,12 @@ async def update_project(
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
+    auth_context: AuthContext = Depends(require_resource_permission("projects", "update")),
 ):
     """
     Updates a project with new data.
-    Requires user to have access to the business that owns the project.
+    Requires 'projects.update' permission and access to the business that owns the project.
     """
-    # Get auth context from middleware - let auth errors bubble up
-    auth_context = require_auth(request)
 
     project_service = ProjectService(db_session=db_session, event_bus=event_bus)
 

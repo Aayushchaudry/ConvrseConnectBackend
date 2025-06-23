@@ -4,6 +4,7 @@ import enum
 import uuid
 
 from sqlalchemy import DECIMAL, Column, DateTime, Enum, Integer, String, func
+from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import (
     relationship,
@@ -33,6 +34,7 @@ class Project(Base):
     """
 
     __tablename__ = "projects"  # This defines the table name in the database
+    __table_args__ = {"schema": "connect_backend"}
 
     # project_id as Primary Key (maps to 'id' in SQLAlchemy for consistency)
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -43,7 +45,7 @@ class Project(Base):
 
     # Status of the project, using our new defined Enum
     status = Column(
-        Enum(ProjectStatus), default=ProjectStatus.INITIATED, nullable=False
+        ENUM("initiated", "info_gathering", "in_progress", "completed", name="projectstatus", schema="connect_backend"), default="initiated", nullable=False
     )
 
     # Financial details - renamed from total_fee to budget
@@ -60,16 +62,16 @@ class Project(Base):
     # --- AUTH INTEGRATION FIELDS ---
     # Business context - links project to a business from auth-service
     business_id = Column(
-        Integer, nullable=False, index=True
+        String(255), nullable=False, index=True
     )  # Foreign key to businesses table in auth-service
 
     # User context - who created and is assigned to this project
     created_by = Column(
-        String(36), nullable=False, index=True
-    )  # Foreign key to users table in auth-service (UUID as string)
+        UUID(as_uuid=True), nullable=False, index=True
+    )  # Foreign key to users table in auth-service (proper UUID)
     assigned_to = Column(
-        String(36), nullable=True, index=True
-    )  # Foreign key to users table in auth-service (UUID as string, optional)
+        UUID(as_uuid=True), nullable=True, index=True
+    )  # Foreign key to users table in auth-service (proper UUID, optional)
 
     # Automatic timestamps for auditing
     created_at = Column(DateTime, default=func.now(), nullable=False)

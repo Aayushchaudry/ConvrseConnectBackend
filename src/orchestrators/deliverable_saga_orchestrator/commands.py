@@ -7,24 +7,11 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 
-# --- Base Command Definition ---
-# All your commands inherit from this to ensure common fields.
-@dataclass
-class BaseCommand:
-    command_id: UUID
-    timestamp: datetime
-    command_type: str
-
-    def __post_init__(self):
-        if not hasattr(self, "command_type") or self.command_type is None:
-            self.command_type = self.__class__.__name__
-
-
 # --- Commands sent by Deliverable SAGA Orchestrator ---
 
 
 @dataclass
-class StartDeliverableInfoGatheringCommand(BaseCommand):
+class StartDeliverableInfoGatheringCommand:
     """
     Command to instruct the Information Gathering Service to start or confirm
     gathering specific requirements for a deliverable.
@@ -34,26 +21,21 @@ class StartDeliverableInfoGatheringCommand(BaseCommand):
 
     project_id: UUID
     deliverable_id: UUID
+    command_id: UUID = None
+    timestamp: datetime = None
+    command_type: str = None
 
-    def __init__(
-        self,
-        project_id: UUID,
-        deliverable_id: UUID,
-        command_id: Optional[UUID] = None,
-        timestamp: Optional[datetime] = None,
-        command_type: Optional[str] = None,
-    ):
-        super().__init__(
-            command_id=command_id or uuid.uuid4(),
-            timestamp=timestamp or datetime.utcnow(),
-            command_type=command_type or "StartDeliverableInfoGatheringCommand",
-        )
-        self.project_id = project_id
-        self.deliverable_id = deliverable_id
+    def __post_init__(self):
+        if self.command_id is None:
+            self.command_id = uuid.uuid4()
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+        if self.command_type is None:
+            self.command_type = "StartDeliverableInfoGatheringCommand"
 
 
 @dataclass
-class InitiateModelingCommand(BaseCommand):
+class InitiateModelingCommand:
     """
     Command to instruct the Production Management Service to begin 3D modeling
     for a deliverable.
@@ -63,28 +45,21 @@ class InitiateModelingCommand(BaseCommand):
 
     project_id: UUID
     deliverable_id: UUID
-    # Optional: Initial modeling requirements (e.g., specific CAD files to use)
-    # modeling_requirements: Optional[Dict[str, Any]] = None
+    command_id: UUID = None
+    timestamp: datetime = None
+    command_type: str = None
 
-    def __init__(
-        self,
-        project_id: UUID,
-        deliverable_id: UUID,
-        command_id: Optional[UUID] = None,
-        timestamp: Optional[datetime] = None,
-        command_type: Optional[str] = None,
-    ):
-        super().__init__(
-            command_id=command_id or uuid.uuid4(),
-            timestamp=timestamp or datetime.utcnow(),
-            command_type=command_type or "InitiateModelingCommand",
-        )
-        self.project_id = project_id
-        self.deliverable_id = deliverable_id
+    def __post_init__(self):
+        if self.command_id is None:
+            self.command_id = uuid.uuid4()
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+        if self.command_type is None:
+            self.command_type = "InitiateModelingCommand"
 
 
 @dataclass
-class InitiateTexturingCommand(BaseCommand):
+class InitiateTexturingCommand:
     """
     Command to instruct the Production Management Service to begin texturing
     for a deliverable.
@@ -94,27 +69,21 @@ class InitiateTexturingCommand(BaseCommand):
 
     project_id: UUID
     deliverable_id: UUID
-    # Optional: Specific material/texture details
+    command_id: UUID = None
+    timestamp: datetime = None
+    command_type: str = None
 
-    def __init__(
-        self,
-        project_id: UUID,
-        deliverable_id: UUID,
-        command_id: Optional[UUID] = None,
-        timestamp: Optional[datetime] = None,
-        command_type: Optional[str] = None,
-    ):
-        super().__init__(
-            command_id=command_id or uuid.uuid4(),
-            timestamp=timestamp or datetime.utcnow(),
-            command_type=command_type or "InitiateTexturingCommand",
-        )
-        self.project_id = project_id
-        self.deliverable_id = deliverable_id
+    def __post_init__(self):
+        if self.command_id is None:
+            self.command_id = uuid.uuid4()
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+        if self.command_type is None:
+            self.command_type = "InitiateTexturingCommand"
 
 
 @dataclass
-class InitiateRenderingCommand(BaseCommand):
+class InitiateRenderingCommand:
     """
     Command to instruct the Production Management Service to begin rendering
     for a deliverable.
@@ -125,66 +94,21 @@ class InitiateRenderingCommand(BaseCommand):
     project_id: UUID
     deliverable_id: UUID
     render_type: str  # e.g., 'white_render', 'low_res_texture_render', 'final_render'
-    # Optional: camera_angles: List[Dict[str, Any]] = None # For specific renders
+    command_id: UUID = None
+    timestamp: datetime = None
+    command_type: str = None
 
-    def __init__(
-        self,
-        project_id: UUID,
-        deliverable_id: UUID,
-        render_type: str,
-        command_id: Optional[UUID] = None,
-        timestamp: Optional[datetime] = None,
-        command_type: Optional[str] = None,
-    ):
-        super().__init__(
-            command_id=command_id or uuid.uuid4(),
-            timestamp=timestamp or datetime.utcnow(),
-            command_type=command_type or "InitiateRenderingCommand",
-        )
-        self.project_id = project_id
-        self.deliverable_id = deliverable_id
-        self.render_type = render_type
+    def __post_init__(self):
+        if self.command_id is None:
+            self.command_id = uuid.uuid4()
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+        if self.command_type is None:
+            self.command_type = "InitiateRenderingCommand"
 
 
 @dataclass
-class GenerateReviewItemCommand(BaseCommand):
-    """
-    Command to instruct the Review Service to generate a review item
-    for client feedback on a deliverable.
-    Published by: Deliverable SAGA Orchestrator
-    Consumed by: Review Service
-    """
-
-    project_id: UUID
-    deliverable_id: UUID
-    review_item_type: (
-        str  # e.g., 'white_render_review', 'texture_review', 'final_review'
-    )
-    asset_urls: List[str]  # URLs to the assets to be reviewed
-
-    def __init__(
-        self,
-        project_id: UUID,
-        deliverable_id: UUID,
-        review_item_type: str,
-        asset_urls: List[str] = None,
-        command_id: Optional[UUID] = None,
-        timestamp: Optional[datetime] = None,
-        command_type: Optional[str] = None,
-    ):
-        super().__init__(
-            command_id=command_id or uuid.uuid4(),
-            timestamp=timestamp or datetime.utcnow(),
-            command_type=command_type or "GenerateReviewItemCommand",
-        )
-        self.project_id = project_id
-        self.deliverable_id = deliverable_id
-        self.review_item_type = review_item_type
-        self.asset_urls = asset_urls or []
-
-
-@dataclass
-class GenerateFinalOutputCommand(BaseCommand):
+class GenerateFinalOutputCommand:
     """
     Command to instruct the Delivery Service to generate and make available
     the final approved output for a deliverable.
@@ -195,29 +119,22 @@ class GenerateFinalOutputCommand(BaseCommand):
     project_id: UUID
     deliverable_id: UUID
     output_name: str
-    # Optional: final_asset_locations: List[str] # URLs to final files
+    approved_review_item_id: Optional[UUID] = None  # ID of the approved review item to use as source
+    command_id: UUID = None
+    timestamp: datetime = None
+    command_type: str = None
 
-    def __init__(
-        self,
-        project_id: UUID,
-        deliverable_id: UUID,
-        output_name: str,
-        command_id: Optional[UUID] = None,
-        timestamp: Optional[datetime] = None,
-        command_type: Optional[str] = None,
-    ):
-        super().__init__(
-            command_id=command_id or uuid.uuid4(),
-            timestamp=timestamp or datetime.utcnow(),
-            command_type=command_type or "GenerateFinalOutputCommand",
-        )
-        self.project_id = project_id
-        self.deliverable_id = deliverable_id
-        self.output_name = output_name
+    def __post_init__(self):
+        if self.command_id is None:
+            self.command_id = uuid.uuid4()
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+        if self.command_type is None:
+            self.command_type = "GenerateFinalOutputCommand"
 
 
 @dataclass
-class UpdateDeliverableStatusInDBCommand(BaseCommand):
+class UpdateDeliverableStatusInDBCommand:
     """
     Command to update the deliverable's overall status in the database.
     (This is different from SAGA state; it's the Deliverable model's status)
@@ -228,24 +145,17 @@ class UpdateDeliverableStatusInDBCommand(BaseCommand):
     project_id: UUID
     deliverable_id: UUID
     new_status: str  # String representation of DeliverableStatus enum
+    command_id: UUID = None
+    timestamp: datetime = None
+    command_type: str = None
 
-    def __init__(
-        self,
-        project_id: UUID,
-        deliverable_id: UUID,
-        new_status: str,
-        command_id: Optional[UUID] = None,
-        timestamp: Optional[datetime] = None,
-        command_type: Optional[str] = None,
-    ):
-        super().__init__(
-            command_id=command_id or uuid.uuid4(),
-            timestamp=timestamp or datetime.utcnow(),
-            command_type=command_type or "UpdateDeliverableStatusInDBCommand",
-        )
-        self.project_id = project_id
-        self.deliverable_id = deliverable_id
-        self.new_status = new_status
+    def __post_init__(self):
+        if self.command_id is None:
+            self.command_id = uuid.uuid4()
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+        if self.command_type is None:
+            self.command_type = "UpdateDeliverableStatusInDBCommand"
 
 
 # Note: Commands like CreateReworkTaskCommand and UpdateInternalTaskStatusCommand

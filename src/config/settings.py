@@ -39,10 +39,10 @@ class Settings(BaseSettings):
     SAGA_RETRY_ATTEMPTS: int = 5
     SAGA_RETRY_DELAY_SECONDS: int = 5
 
-    # CORS settings - Dynamic subdomain support
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8000,http://localhost:8001"
+    # CORS settings - Allow all origins for development (temporary fix)
+    ALLOWED_ORIGINS: str = "*"
     
-    # Domain patterns for dynamic CORS validation
+    # Domain patterns for dynamic CORS validation (kept for reference)
     ALLOWED_DOMAIN_PATTERNS: str = "localhost,convrse.com,convrse.local"
 
     model_config = SettingsConfigDict(

@@ -439,7 +439,7 @@ class TestReviewManagementService:
             source_internal_task_id=uuid4(),
             item_type=ReviewItemType.TECHNICAL_MODEL,
             item_url="http://example.com/model.glb",
-            review_status=ReviewStatus.PENDING,
+            review_status=ReviewStatus.PENDING_REVIEW,
         )
 
         feedback_event = ClientFeedbackSubmittedEvent(
@@ -463,7 +463,7 @@ class TestReviewManagementService:
             mock_get_review_item.assert_awaited_once()
 
             # Verify that the review_item's status has been updated in the mock object
-            assert mock_review.review_status == ReviewStatus.ACCEPTED
+            assert mock_review.review_status == ReviewStatus.APPROVED
 
             # Note: The service doesn't publish events per the implementation comments
 
@@ -480,7 +480,7 @@ class TestReviewManagementService:
                 source_internal_task_id=uuid4(),
                 item_type=ReviewItemType.TECHNICAL_MODEL,
                 item_url="http://example.com/review1.jpg",
-                review_status=ReviewStatus.PENDING,
+                review_status=ReviewStatus.PENDING_REVIEW,
             ),
             ReviewItem(
                 description="Review 2",
@@ -489,13 +489,13 @@ class TestReviewManagementService:
                 source_internal_task_id=uuid4(),
                 item_type=ReviewItemType.STATIC_RENDER,
                 item_url="http://example.com/review2.jpg",
-                review_status=ReviewStatus.PENDING,
+                review_status=ReviewStatus.PENDING_REVIEW,
             ),
         ]
 
         # Just test that we can create ReviewItem objects with proper fields
         assert len(mock_reviews) == 2
-        assert all(r.review_status == ReviewStatus.PENDING for r in mock_reviews)
+        assert all(r.review_status == ReviewStatus.PENDING_REVIEW for r in mock_reviews)
 
 
 @pytest.mark.unit

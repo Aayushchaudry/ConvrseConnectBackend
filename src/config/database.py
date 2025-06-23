@@ -30,13 +30,20 @@ engine = create_async_engine(
     database_url,
     echo=settings.DEBUG,  # Set to True to log all SQL statements for debugging
     pool_pre_ping=True,  # Ensures connections are healthy
-    connect_args={"server_settings": {"search_path": schema_name}},
+    pool_size=10,  # Increase pool size
+    max_overflow=20,  # Allow overflow connections
+    pool_recycle=3600,  # Recycle connections every hour
+    pool_timeout=30,  # Timeout for getting connection from pool
+    connect_args={
+        "server_settings": {"search_path": schema_name},
+        "command_timeout": 30,  # 30 second timeout for commands
+    },
 )
 
 # Async sessionmaker for database operations
 AsyncSessionLocal = sessionmaker(
     autocommit=False,
-    autoflush=False,
+    autoflush=False,  # Don't auto-flush to prevent unnecessary queries
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,  # Prevents objects from expiring after commit
@@ -46,7 +53,17 @@ AsyncSessionLocal = sessionmaker(
 async def get_db_session():
     """Dependency for FastAPI routes to get a database session."""
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+            # Only commit if there were no exceptions
+            await session.commit()
+        except Exception:
+            # Rollback on any exception
+            await session.rollback()
+            raise
+        finally:
+            # Session is automatically closed by context manager
+            pass
 
 
 async def init_db():

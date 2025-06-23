@@ -21,12 +21,13 @@ class RequirementFile(Base):
     """
 
     __tablename__ = "requirement_files"
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # Foreign Key linking to the Requirement it fulfills
     requirement_id = Column(
-        UUID(as_uuid=True), ForeignKey("requirements.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.requirements.id"), nullable=False
     )
 
     # Metadata about the file

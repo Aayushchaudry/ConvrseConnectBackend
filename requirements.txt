@@ -26,6 +26,9 @@ python-jose[cryptography]>=3.3.0
 httpx>=0.25.2
 aiohttp>=3.9.0
 
+# AI and CopilotKit integration
+google-genai>=1.0.0
+
 # Caching for token management
 redis>=5.0.1
 aioredis>=2.0.1

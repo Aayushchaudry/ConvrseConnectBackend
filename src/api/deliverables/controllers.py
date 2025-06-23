@@ -53,9 +53,9 @@ class DeliverableResponse(BaseModel):
 
     id: UUID
     project_id: UUID
-    deliverable_type: DeliverableType
+    deliverable_type: str  # Changed to string since we store string values
     deliverable_sub_type: Optional[str]
-    current_status: DeliverableStatus
+    current_status: str  # Changed to string since we store string values
     tentative_timeline_days: Optional[int]
     created_at: datetime
     updated_at: datetime
@@ -93,8 +93,8 @@ async def create_deliverable_for_project(
             deliverable_type=deliverable_data.deliverable_type,
             deliverable_sub_type=deliverable_data.deliverable_sub_type,
             tentative_timeline_days=deliverable_data.tentative_timeline_days,
-            created_by=1,  # TODO: Get from auth context
-            assigned_to=1,  # TODO: Get from auth context
+            created_by=UUID("00000000-0000-0000-0000-000000000001"),  # TODO: Get from auth context
+            assigned_to=UUID("00000000-0000-0000-0000-000000000001"),  # TODO: Get from auth context
         )
 
         return created_deliverable
@@ -182,8 +182,8 @@ async def create_deliverable(
             deliverable_type=DeliverableType(deliverable_data["deliverable_type"]),
             deliverable_sub_type=deliverable_data.get("deliverable_sub_type"),
             tentative_timeline_days=deliverable_data.get("tentative_timeline_days"),
-            created_by=1,  # TODO: Get from auth context
-            assigned_to=1,  # TODO: Get from auth context
+            created_by=UUID("00000000-0000-0000-0000-000000000001"),  # TODO: Get from auth context
+            assigned_to=UUID("00000000-0000-0000-0000-000000000001"),  # TODO: Get from auth context
         )
 
         return created_deliverable

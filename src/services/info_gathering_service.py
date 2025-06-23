@@ -247,19 +247,33 @@ class InformationGatheringService:
                     return
 
                 for deliverable in deliverables_to_process:
+                    # Handle both string and enum deliverable_type
+                    deliverable_type_str = (
+                        deliverable.deliverable_type.value 
+                        if hasattr(deliverable.deliverable_type, 'value') 
+                        else str(deliverable.deliverable_type)
+                    )
+                    
                     logger.info(
-                        f"InformationGatheringService: Processing deliverable {deliverable.id} ({deliverable.deliverable_type.value}) for requirements."
+                        f"InformationGatheringService: Processing deliverable {deliverable.id} ({deliverable_type_str}) for requirements."
                     )
 
                     # Retrieve requirements from the map
-                    # SQLAlchemy returns the enum object directly, so we can use it as the key
-                    required_items = DELIVERABLE_REQUIREMENTS_MAP.get(
-                        deliverable.deliverable_type
-                    )
+                    # Handle both enum and string keys
+                    deliverable_type_key = deliverable.deliverable_type
+                    if isinstance(deliverable_type_key, str):
+                        # Convert string to enum for map lookup
+                        try:
+                            deliverable_type_key = DeliverableType(deliverable_type_key)
+                        except ValueError:
+                            logger.error(f"Invalid deliverable type: {deliverable_type_key}")
+                            continue
+                    
+                    required_items = DELIVERABLE_REQUIREMENTS_MAP.get(deliverable_type_key)
 
                     if not required_items:
                         logger.warning(
-                            f"No predefined requirements found for deliverable type: {deliverable.deliverable_type.value}. Skipping requirement creation."
+                            f"No predefined requirements found for deliverable type: {deliverable_type_str}. Skipping requirement creation."
                         )
                         # Publish an event indicating requirements were skipped for this deliverable type
                         await self.event_bus.publish(
@@ -267,7 +281,7 @@ class InformationGatheringService:
                             message=DeliverableInfoGatheringFailedEvent(
                                 project_id=project.id,
                                 deliverable_id=deliverable.id,
-                                reason=f"No predefined requirements for type {deliverable.deliverable_type.value}",
+                                reason=f"No predefined requirements for type {deliverable_type_str}",
                                 error_details={"type": "NO_PREDEFINED_REQUIREMENTS"},
                             ).__dict__,
                         )
@@ -353,7 +367,7 @@ class InformationGatheringService:
                                 deliverable_id=deliverable.id,
                                 reason=f"Failed to create requirements: {str(e)}",
                                 error_details={
-                                    "deliverable_type": deliverable.deliverable_type.value
+                                    "deliverable_type": deliverable_type_str
                                 },
                             ).__dict__,
                         )

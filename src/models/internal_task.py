@@ -21,38 +21,38 @@ from src.models.project import Project  # Import Project model for ForeignKey
 class TaskType(enum.Enum):
     """Defines the type of internal production task."""
 
-    MODELING = "modeling"
-    TEXTURING = "texturing"
-    LIGHTING = "lighting"
-    RENDERING = "rendering"
-    COMPOSITING = "compositing"
-    REWORK = "rework"  # For tasks generated due to client comments/rejection
-    REVIEW_INTERNAL = "review_internal"  # For internal QA/review tasks
-    FINAL_PREP = "final_prep"  # Final preparation before delivery
-    OTHER = "other"
+    MODELING = "MODELING"
+    TEXTURING = "TEXTURING"
+    LIGHTING = "LIGHTING"
+    RENDERING = "RENDERING"
+    COMPOSITING = "COMPOSITING"
+    REWORK = "REWORK"  # For tasks generated due to client comments/rejection
+    REVIEW_INTERNAL = "REVIEW_INTERNAL"  # For internal QA/review tasks
+    FINAL_PREP = "FINAL_PREP"  # Final preparation before delivery
+    OTHER = "OTHER"
 
 
 class TaskStatus(enum.Enum):
     """Defines the current status of an internal task."""
 
-    TODO = "to_do"
-    IN_PROGRESS = "in_progress"
+    TODO = "TODO"
+    IN_PROGRESS = "IN_PROGRESS"
     AWAITING_REVIEW = (
-        "awaiting_review"  # Awaiting internal review or client review prep
+        "AWAITING_REVIEW"  # Awaiting internal review or client review prep
     )
-    DONE = "done"
-    BLOCKED = "blocked"  # Task is blocked waiting for something else
-    ON_HOLD = "on_hold"
-    REJECTED_TERMINATED = "rejected_terminated"  # Task rejected, work stopped on it
+    DONE = "DONE"
+    BLOCKED = "BLOCKED"  # Task is blocked waiting for something else
+    ON_HOLD = "ON_HOLD"
+    REJECTED_TERMINATED = "REJECTED_TERMINATED"  # Task rejected, work stopped on it
 
 
 class Priority(enum.Enum):
     """Defines the priority level of an internal task."""
 
-    LOW = "low"
-    NORMAL = "normal"
-    HIGH = "high"
-    CRITICAL = "critical"
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 
 # --- InternalTask ORM Model ---
@@ -65,32 +65,33 @@ class InternalTask(Base):
     """
 
     __tablename__ = "internal_tasks"
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # Foreign Keys linking to the Deliverable and Project
     deliverable_id = Column(
-        UUID(as_uuid=True), ForeignKey("deliverables.id"), nullable=True  # Allow project-level tasks
+        UUID(as_uuid=True), ForeignKey("connect_backend.deliverables.id"), nullable=True  # Allow project-level tasks
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False
     )  # For convenience
 
     # For parent-subtask relationship (e.g., rework tasks)
     parent_task_id = Column(
-        UUID(as_uuid=True), ForeignKey("internal_tasks.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("connect_backend.internal_tasks.id"), nullable=True
     )
 
     task_name = Column(String(255), nullable=False)  # Descriptive name for the task
     task_type = Column(
-        Enum(TaskType), nullable=False
+        Enum(TaskType, schema="connect_backend"), nullable=False
     )  # Type of work (e.g., modeling, rendering)
 
     # User assigned to this task (if User model is implemented)
     # assigned_to_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
 
-    status = Column(Enum(TaskStatus), default=TaskStatus.TODO, nullable=False)
-    priority = Column(Enum(Priority), default=Priority.NORMAL, nullable=False)
+    status = Column(Enum(TaskStatus, schema="connect_backend"), nullable=False)
+    priority = Column(Enum(Priority, schema="connect_backend"), default=Priority.NORMAL, nullable=False)
 
     start_date = Column(DateTime, nullable=True)
     tentative_end_date = Column(DateTime, nullable=True)  # Expected completion
@@ -100,7 +101,7 @@ class InternalTask(Base):
 
     # Source of the task, e.g., if it was created due to feedback on a specific ReviewItem
     source_review_item_id = Column(
-        UUID(as_uuid=True), ForeignKey("review_items.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("connect_backend.review_items.id"), nullable=True
     )
 
     created_at = Column(DateTime, default=func.now(), nullable=False)

@@ -16,8 +16,10 @@ from src.api.integration.auth_endpoints import router as integration_router
 from src.api.internal_tasks.controllers import router as internal_tasks_router
 from src.api.project_outputs.controllers import router as project_outputs_router
 from src.api.projects.controllers import router as projects_router
+from src.api.requirements.controllers import router as requirements_router
 from src.api.review_items.controllers import router as review_items_router
 from src.api.websocket_controller import router as websocket_router
+from src.api.copilot.controllers import router as copilot_router
 from src.config.database import init_db
 from src.config.event_bus import close_event_bus, get_event_bus
 from src.config.settings import settings
@@ -27,6 +29,9 @@ from src.listeners.client_feedback_listener import (
 )
 from src.listeners.deliverable_events_listener import (
     start_listening as start_deliverable_events_listener,
+)
+from src.listeners.delivery_listener import (
+    start_listening as start_delivery_listener,
 )
 from src.listeners.info_gathering_listener import (
     start_listening as start_info_gathering_listener,
@@ -56,43 +61,45 @@ background_tasks: List[asyncio.Task] = []
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Handles startup and shutdown events for the FastAPI application.
+    Lifespan context manager for FastAPI application.
+    Handles startup and shutdown events.
     """
-    logger.info("Application starting up...")
-
-    # 1. Initialize Database
+    logger.info("=== LIFESPAN STARTUP STARTED ===")
+    
+    # Startup logic
+    background_tasks = []
+    
     try:
+        logger.info("Initializing database...")
         await init_db()
         logger.info("Database initialized successfully.")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
 
-    # 2. Initialize Auth Service Client
-    try:
-        auth_client = await get_auth_client()
-        # Test auth service connectivity
-        health_status = await auth_client.health_check()
-        if health_status:
-            logger.info("Auth service connection established successfully.")
-        else:
-            logger.warning(
-                "Auth service health check failed - service may be unavailable"
-            )
-    except Exception as e:
-        logger.error(f"Failed to initialize auth service client: {e}")
-        # Don't fail startup - allow graceful degradation
-        logger.warning(
-            "Continuing startup without auth service - some features may be limited"
-        )
-
-    # 3. Initialize Event Bus
-    try:
+        # Initialize Event Bus
+        logger.info("Initializing event bus...")
         event_bus = await get_event_bus()
-        logger.info("Event Bus initialized and connected successfully.")
+        logger.info("Event bus initialized successfully.")
+
+        # 2. Initialize Auth Service Client
+        try:
+            auth_client = await get_auth_client()
+            # Test auth service connectivity
+            health_status = await auth_client.health_check()
+            if health_status:
+                logger.info("Auth service connection established successfully.")
+            else:
+                logger.warning(
+                    "Auth service health check failed - service may be unavailable"
+                )
+        except Exception as e:
+            logger.error(f"Failed to initialize auth service client: {e}")
+            # Don't fail startup - allow graceful degradation
+            logger.warning(
+                "Continuing startup without auth service - some features may be limited"
+            )
 
         # 4. Start SAGA Listeners
         # Information Gathering Listener
+        logger.info("Starting Information Gathering Listener...")
         info_gathering_listener_task = asyncio.create_task(
             start_info_gathering_listener(event_bus)
         )
@@ -100,6 +107,7 @@ async def lifespan(app: FastAPI):
         logger.info("Information Gathering Listener started in background.")
 
         # Deliverable Events Listener
+        logger.info("Starting Deliverable Events Listener...")
         deliverable_events_listener_task = asyncio.create_task(
             start_deliverable_events_listener(event_bus)
         )
@@ -107,6 +115,7 @@ async def lifespan(app: FastAPI):
         logger.info("Deliverable Events Listener started in background.")
 
         # Production Management Listener
+        logger.info("Starting Production Management Listener...")
         production_management_listener_task = asyncio.create_task(
             start_production_management_listener(event_bus)
         )
@@ -114,6 +123,7 @@ async def lifespan(app: FastAPI):
         logger.info("Production Management Listener started in background.")
 
         # Review Management Listener
+        logger.info("Starting Review Management Listener...")
         review_management_listener_task = asyncio.create_task(
             start_review_management_listener(event_bus)
         )
@@ -121,11 +131,20 @@ async def lifespan(app: FastAPI):
         logger.info("Review Management Listener started in background.")
 
         # Client Feedback Listener
+        logger.info("Starting Client Feedback Listener...")
         client_feedback_listener_task = asyncio.create_task(
             start_client_feedback_listener(event_bus)
         )
         background_tasks.append(client_feedback_listener_task)
         logger.info("Client Feedback Listener started in background.")
+
+        # Delivery Listener
+        logger.info("Starting Delivery Listener...")
+        delivery_listener_task = asyncio.create_task(
+            start_delivery_listener(event_bus)
+        )
+        background_tasks.append(delivery_listener_task)
+        logger.info("Delivery Listener started in background.")
 
     except Exception as e:
         logger.error(f"Failed to initialize Event Bus or start listeners: {e}")
@@ -157,15 +176,15 @@ app = FastAPI(
     lifespan=lifespan,  # Attach the lifespan context manager
 )
 
-# Add CORS middleware with dynamic subdomain support
-app.add_middleware(
-    DynamicCORSMiddleware,
-    allowed_origins=settings.allowed_origins_list,
-    allowed_domain_patterns=settings.allowed_domain_patterns_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS is handled by nginx - disable FastAPI CORS to avoid conflicts
+# app.add_middleware(
+#     DynamicCORSMiddleware,
+#     allowed_origins=settings.allowed_origins_list,
+#     allowed_domain_patterns=settings.allowed_domain_patterns_list,
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 # Add authentication middleware
 app.add_middleware(
@@ -177,12 +196,15 @@ app.add_middleware(
         "/openapi.json",
         "/api/v1/health",
         "/api/v1/integration/health",
+        "/api/v1/copilot/health",
+        "/api/v1/copilot/chat",
     ],
 )
 
 # Include your API routers here
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(deliverables_router, prefix="/api/v1")
+app.include_router(requirements_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(review_items_router, prefix="/api/v1")
 app.include_router(internal_tasks_router, prefix="/api/v1")
@@ -190,6 +212,7 @@ app.include_router(project_outputs_router, prefix="/api/v1")
 app.include_router(integration_router, prefix="/api/v1")
 app.include_router(debug_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(copilot_router)
 app.include_router(websocket_router)
 
 

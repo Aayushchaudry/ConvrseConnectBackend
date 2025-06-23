@@ -286,41 +286,114 @@ class DashboardService:
         ]
 
     async def get_dashboard_timeline(self, business_id: int, limit: int = 10) -> List[TimelineItem]:
-        """Get timeline events for dashboard overview."""
+        """Get timeline events for dashboard overview with granular activity tracking."""
         
         timeline_events = []
         
-        # Get upcoming project deadlines
-        upcoming_projects_query = (
-            select(Project)
-            .where(
-                and_(
-                    Project.business_id == business_id,
-                    Project.end_date >= datetime.now(),
-                    Project.status.in_([ProjectStatus.IN_PROGRESS, ProjectStatus.INFO_GATHERING])
+        try:
+            # Get recent task completions (last 30 days)
+            since_date = datetime.now() - timedelta(days=30)
+            
+            completed_tasks_query = (
+                select(InternalTask)
+                .join(Project)
+                .where(
+                    and_(
+                        Project.business_id == business_id,
+                        InternalTask.status == "DONE",
+                        InternalTask.actual_end_date >= since_date
+                    )
                 )
+                .order_by(InternalTask.actual_end_date.desc())
+                .limit(limit)
             )
-            .order_by(Project.end_date)
-            .limit(limit)
-        )
-        upcoming_projects_result = await self.db_session.execute(upcoming_projects_query)
-        upcoming_projects = upcoming_projects_result.scalars().all()
-        
-        for project in upcoming_projects:
-            if project.end_date:
+            
+            # Execute query without causing rollbacks
+            result = await self.db_session.execute(completed_tasks_query)
+            completed_tasks = result.scalars().all()
+            
+            for task in completed_tasks:
                 timeline_events.append(TimelineItem(
-                    id=f"project_end_{project.id}",
+                    id=f"task-completed-{task.id}",
+                    project_id=str(task.project_id),
+                    project_name=f"Project Task",  # We'd need to join to get project name
+                    deliverable_id=str(task.deliverable_id) if task.deliverable_id else None,
+                    deliverable_name=None,
+                    event_type="task_completed",
+                    event_date=task.actual_end_date or task.updated_at,
+                    status="completed",
+                    description=f"{task.task_type} task completed: {task.task_name}"
+                ))
+            
+            # Get recent review submissions (last 30 days)
+            review_submissions_query = (
+                select(ReviewItem)
+                .join(Project)
+                .where(
+                    and_(
+                        Project.business_id == business_id,
+                        ReviewItem.presented_at >= since_date
+                    )
+                )
+                .order_by(ReviewItem.presented_at.desc())
+                .limit(limit)
+            )
+            
+            result = await self.db_session.execute(review_submissions_query)
+            review_items = result.scalars().all()
+            
+            for review in review_items:
+                timeline_events.append(TimelineItem(
+                    id=f"review-submitted-{review.id}",
+                    project_id=str(review.project_id),
+                    project_name=f"Review Item",
+                    deliverable_id=str(review.deliverable_id) if review.deliverable_id else None,
+                    deliverable_name=None,
+                    event_type="review_submitted",
+                    event_date=review.presented_at,
+                    status=review.review_status.value,
+                    description=f"Review item submitted: {review.description or review.item_type.value}"
+                ))
+            
+            # Get recent project starts (last 30 days)
+            project_starts_query = (
+                select(Project)
+                .where(
+                    and_(
+                        Project.business_id == business_id,
+                        Project.start_date >= since_date
+                    )
+                )
+                .order_by(Project.start_date.desc())
+                .limit(limit)
+            )
+            
+            result = await self.db_session.execute(project_starts_query)
+            projects = result.scalars().all()
+        
+            for project in projects:
+                timeline_events.append(TimelineItem(
+                    id=f"project-started-{project.id}",
                     project_id=str(project.id),
                     project_name=project.name,
-                    event_type="project_end",
-                    event_date=project.end_date,
-                    status=project.status.value,
-                    description=f"Project '{project.name}' deadline"
+                    deliverable_id=None,
+                    deliverable_name=None,
+                    event_type="project_started",
+                    event_date=project.start_date,
+                    status="active",
+                    description=f"Project '{project.name}' started"
                 ))
         
-        # Sort by date and limit
-        timeline_events.sort(key=lambda x: x.event_date)
-        return timeline_events[:limit]
+            # Sort all events by date (most recent first)
+            timeline_events.sort(key=lambda x: x.event_date, reverse=True)
+            
+            # Return only the most recent events up to the limit
+            return timeline_events[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error fetching timeline events: {e}", exc_info=True)
+            # Return empty list on error instead of raising
+            return []
 
     async def get_project_timeline(self, project_id: UUID, limit: int = 10) -> List[TimelineItem]:
         """Get timeline events for a specific project."""

@@ -52,28 +52,29 @@ class ClientFeedback(Base):
     """
 
     __tablename__ = "client_feedbacks"
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # Foreign Keys linking to the entities this feedback is related to
     # A feedback must be related to either a ReviewItem OR a ProjectOutput
     review_item_id = Column(
-        UUID(as_uuid=True), ForeignKey("review_items.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("connect_backend.review_items.id"), nullable=True
     )
     project_output_id = Column(
-        UUID(as_uuid=True), ForeignKey("project_outputs.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("connect_backend.project_outputs.id"), nullable=True
     )  # Will be defined next
 
     # Link to the Project, Deliverable for convenience in queries
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False)
     deliverable_id = Column(
-        UUID(as_uuid=True), ForeignKey("deliverables.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.deliverables.id"), nullable=False
     )
 
     # Who provided the feedback (if User model is implemented and linked to clients)
     # client_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False) # Or nullable if anonymous feedback allowed
 
-    feedback_type = Column(Enum(FeedbackType), nullable=False)  # Type of feedback
+    feedback_type = Column(Enum(FeedbackType, schema="connect_backend"), nullable=False)  # Type of feedback
 
     comment_text = Column(Text, nullable=True)  # The actual text comment
 

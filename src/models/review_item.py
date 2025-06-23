@@ -22,30 +22,27 @@ from src.models.project import Project  # Import Project model for ForeignKey
 class ReviewItemType(enum.Enum):
     """Defines the type of content being reviewed."""
 
-    RENDER_OPTION = "render_option"  # For multiple static images presented as options
-    STATIC_RENDER = "static_render"  # A single, specific still render
-    TECHNICAL_MODEL = "technical_model"
-    THREE_SIXTY_VIEW = "360_view"
-    VIDEO_SEGMENT = "video_segment"  # A short clip from a video walkthrough
-    VIDEO_DRAFT = "video_draft"  # An entire draft video
-    MAP_DRAFT = "map_draft"  # An initial design draft of a map
-    UI_PROTOTYPE = "ui_prototype"  # For interactive apps like sales app or interplayer
-    DRONE_FOOTAGE = "drone_footage"
-    STORYBOARD = "storyboard"
+    # Generic content types
+    IMAGE = "image"
+    VIDEO = "video"
+    DOCUMENT = "document"
+    INTERACTIVE_CONTENT = "interactive_content"
     OTHER = "other"
+    
+    # Business-specific review types for production workflow
+    STATIC_RENDER = "STATIC_RENDER"      # For modeling/static image reviews
+    TEXTURE_REVIEW = "TEXTURE_REVIEW"    # For texture and material reviews
+    FINAL_RENDER = "FINAL_RENDER"        # For final rendering reviews
+    WORK_REVIEW = "WORK_REVIEW"          # For general work completion reviews
 
 
 class ReviewStatus(enum.Enum):
     """Defines the current status of a review item from client perspective."""
 
-    PENDING = "pending"  # Waiting for client to review
-    ACCEPTED = "accepted"  # Client has approved this item
-    REJECTED = "rejected"  # Client has rejected this item
-    COMMENTED = "commented"  # Client has left comments but not yet approved/rejected
-    SELECTED = "selected"  # For options, client selected this one (implies acceptance of this option)
-    REVISIONS_PENDING = (
-        "revisions_pending"  # Revisions requested by client, awaiting new version
-    )
+    PENDING_REVIEW = "PENDING_REVIEW"  # Waiting for client to review
+    APPROVED = "APPROVED"  # Client has approved this item  
+    REJECTED = "REJECTED"  # Client has rejected this item
+    NEEDS_REVISION = "NEEDS_REVISION"  # Client has provided comments requiring revisions
 
 
 # --- ReviewItem ORM Model ---
@@ -58,32 +55,39 @@ class ReviewItem(Base):
     """
 
     __tablename__ = "review_items"
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # Foreign Keys linking to the Deliverable, Project, and the InternalTask that produced it
     deliverable_id = Column(
-        UUID(as_uuid=True), ForeignKey("deliverables.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.deliverables.id"), nullable=False
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False
     )  # For convenience
     source_internal_task_id = Column(
-        UUID(as_uuid=True), ForeignKey("internal_tasks.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.internal_tasks.id"), nullable=False
     )  # The task that generated this output
 
     item_type = Column(
-        Enum(ReviewItemType), nullable=False
+        Enum(ReviewItemType, schema="connect_backend"), nullable=False
     )  # Type of content being reviewed
+    
+    # File reference options - either platform_file_id OR item_url can be used
+    platform_file_id = Column(
+        UUID(as_uuid=True), nullable=True
+    )  # Reference to file ID in platform-service for review assets
     item_url = Column(
-        Text, nullable=False
-    )  # URL to the asset (e.g., image URL, video URL, prototype link)
+        Text, nullable=True
+    )  # Optional URL to the asset - nullable for review items that do not require file attachments
+    
     description = Column(
         Text, nullable=True
     )  # Description/context for this specific review item
 
     review_status = Column(
-        Enum(ReviewStatus), default=ReviewStatus.PENDING, nullable=False
+        Enum(ReviewStatus, schema="connect_backend"), default=ReviewStatus.PENDING_REVIEW, nullable=False
     )  # Current status from client's review perspective
 
     # For review batches or specific rounds

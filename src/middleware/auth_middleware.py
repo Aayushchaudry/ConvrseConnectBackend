@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional
 from fastapi import HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from src.config.auth_config import get_auth_config
 from src.integrations.auth_service_client import (
@@ -32,7 +33,7 @@ class AuthContext:
         user: Optional[UserData] = None,
         token: Optional[str] = None,
         correlation_id: Optional[str] = None,
-        business_id: Optional[int] = None,
+        business_id: Optional[str] = None,
     ):
         self.user = user
         self.token = token
@@ -60,27 +61,52 @@ class AuthContext:
         """Get username"""
         return self.user.username if self.user else None
 
-    def has_business_access(self, business_id: int) -> bool:
+    def has_business_access(self, business_id: str) -> bool:
         """Check if user has access to specific business"""
         if self.is_super_admin:
             return True
 
-        if not self.user or not self.user.businesses:
+        if not self.user:
             return False
 
-        business_ids = [b.get("business_id") for b in self.user.businesses]
-        return business_id in business_ids
+        # Special case: project-manager role in biz_convrse_default has cross-business access
+        if (self.user.role_name == "project-manager" and 
+            hasattr(self.user, 'business_id') and 
+            self.user.business_id == "biz_convrse_default"):
+            return True
 
-    def get_accessible_business_ids(self) -> List[int]:
+        # Check user's direct business_id first (for single-business users)
+        if hasattr(self.user, 'business_id') and self.user.business_id == business_id:
+            return True
+
+        # Check user's businesses array (for multi-business users)
+        if self.user.businesses:
+            business_ids = [b.get("business_id") for b in self.user.businesses]
+            return business_id in business_ids
+
+        return False
+
+    def get_accessible_business_ids(self) -> List[str]:
         """Get list of accessible business IDs"""
-        if not self.user or not self.user.businesses:
+        if not self.user:
             return []
 
-        return [
-            b.get("business_id")
-            for b in self.user.businesses
-            if b.get("is_active", True)
-        ]
+        business_ids = []
+        
+        # Add direct business_id if present
+        if hasattr(self.user, 'business_id') and self.user.business_id:
+            business_ids.append(self.user.business_id)
+        
+        # Add businesses array if present
+        if self.user.businesses:
+            business_ids.extend([
+                b.get("business_id")
+                for b in self.user.businesses
+                if b.get("is_active", True) and b.get("business_id")
+            ])
+        
+        # Remove duplicates while preserving order
+        return list(dict.fromkeys(business_ids))
 
 
 class AuthenticationMiddleware(BaseHTTPMiddleware):
@@ -140,9 +166,9 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 f"Token validation failed: {e}",
                 extra={"correlation_id": correlation_id, "path": request.url.path},
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
+                content={"detail": "Invalid or expired token"},
                 headers={"X-Correlation-ID": correlation_id},
             )
 
@@ -151,9 +177,9 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 f"Auth service error: {e}",
                 extra={"correlation_id": correlation_id, "path": request.url.path},
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Authentication service temporarily unavailable",
+                content={"detail": "Authentication service temporarily unavailable"},
                 headers={"X-Correlation-ID": correlation_id},
             )
 
@@ -162,9 +188,9 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 f"Authentication middleware error: {e}",
                 extra={"correlation_id": correlation_id, "path": request.url.path},
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Internal authentication error",
+                content={"detail": "Internal authentication error"},
                 headers={"X-Correlation-ID": correlation_id},
             )
 
@@ -232,23 +258,17 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         except ValueError:
             return None
 
-    def _extract_business_id(self, request: Request) -> Optional[int]:
+    def _extract_business_id(self, request: Request) -> Optional[str]:
         """Extract business ID from request"""
         # Try query parameter first
         business_id = request.query_params.get("business_id")
         if business_id:
-            try:
-                return int(business_id)
-            except ValueError:
-                pass
+            return business_id
 
         # Try header
         business_id = request.headers.get("X-Business-ID")
         if business_id:
-            try:
-                return int(business_id)
-            except ValueError:
-                pass
+            return business_id
 
         return None
 
@@ -270,7 +290,7 @@ def require_auth(request: Request) -> AuthContext:
     return auth
 
 
-def require_business_access(request: Request, business_id: int) -> AuthContext:
+def require_business_access(request: Request, business_id: str) -> AuthContext:
     """Require business access and return auth context"""
     auth = require_auth(request)
 
@@ -331,7 +351,7 @@ def get_required_auth_dependency():
     return required_auth_dependency
 
 
-def get_business_auth_dependency(business_id: int):
+def get_business_auth_dependency(business_id: str):
     """FastAPI dependency for business-specific authentication"""
 
     def business_auth_dependency(request: Request) -> AuthContext:

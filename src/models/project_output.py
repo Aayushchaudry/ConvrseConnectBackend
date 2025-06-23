@@ -22,15 +22,16 @@ class ProjectOutput(Base):
     """
 
     __tablename__ = "project_outputs"
+    __table_args__ = {"schema": "connect_backend"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # Foreign Keys linking to the Deliverable and Project
     deliverable_id = Column(
-        UUID(as_uuid=True), ForeignKey("deliverables.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.deliverables.id"), nullable=False
     )
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False
     )  # For convenience
 
     # Descriptive name for the final output (e.g., "Final High-Res Renders Pack")

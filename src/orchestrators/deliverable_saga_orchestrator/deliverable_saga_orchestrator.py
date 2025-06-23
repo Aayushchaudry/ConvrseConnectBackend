@@ -18,6 +18,11 @@ from src.commands.production_commands import (
 from src.commands.project_commands import (
     StartDeliverableSagaCommand,
 )  # This command initiates *this* SAGA
+from src.commands.deliverable_commands import (
+    GenerateReviewItemCommand,
+    UpdateDeliverableStatusCommand,
+)
+from src.config import settings  # Import settings for SAGA retry configuration
 from src.events.client_feedback_events import (
     ClientFeedbackSubmittedEvent,
     ReviewItemApprovedEvent,
@@ -33,6 +38,7 @@ from src.events.event_bus_interface import EventBus
 from src.events.project_events import DeliverableDeliveredEvent, DeliverableFailedEvent
 from src.events.task_events import (
     InternalTaskCompletedEvent,
+    InternalTaskCompletedWithMediaEvent,
     InternalTaskCreatedEvent,
     InternalTaskFailedEvent,
     InternalTaskStatusUpdatedEvent,
@@ -41,10 +47,10 @@ from src.models.deliverable import (
     Deliverable,  # Needed for status updates
     DeliverableStatus,
 )
+from src.models.review_item import ReviewItem  # Import ReviewItem model
 from src.models.saga_state import SagaState, SagaStatus, SagaType
 from src.orchestrators.deliverable_saga_orchestrator.commands import (
     GenerateFinalOutputCommand,
-    GenerateReviewItemCommand,
     InitiateModelingCommand,
     InitiateRenderingCommand,
     InitiateTexturingCommand,
@@ -84,6 +90,7 @@ class DeliverableSagaOrchestrator:
             "DeliverableInfoGatheredEvent": self.on_deliverable_info_gathered,
             "DeliverableInfoGatheringFailedEvent": self.on_deliverable_info_gathering_failed,
             "InternalTaskCompletedEvent": self.on_internal_task_completed,
+            "InternalTaskCompletedWithMediaEvent": self.on_internal_task_completed_with_media,
             "InternalTaskFailedEvent": self.on_internal_task_failed,
             "ClientFeedbackSubmittedEvent": self.on_client_feedback_submitted,
             # Add handlers for other events as needed for more granular control
@@ -266,11 +273,10 @@ class DeliverableSagaOrchestrator:
             await self.saga_processor.publish_message(
                 topic="project.deliverable.failed",  # Define this topic
                 message_payload=DeliverableFailedEvent(
-                    event_id=uuid.uuid4(),
-                    timestamp=datetime.utcnow(),
                     project_id=event.project_id,
                     deliverable_id=event.deliverable_id,
-                    failure_reason=f"Info gathering failed: {event.reason}",
+                    deliverable_name="Unknown",  # We don't have deliverable name in the event
+                    reason=f"Info gathering failed: {event.reason}",
                 ),
             )
 
@@ -308,10 +314,22 @@ class DeliverableSagaOrchestrator:
             command_topic = None
             command_id_to_record = None  # Default no command ID to record
 
+            # Get the next sequence number for this deliverable (needed for all paths)
+            from sqlalchemy import func, select
+            from src.models.review_item import ReviewItem
+            
+            result = await session.execute(
+                select(func.coalesce(func.max(ReviewItem.sequence_number), 0)).filter(
+                    ReviewItem.deliverable_id == event.deliverable_id
+                )
+            )
+            max_sequence = result.scalar()
+            next_sequence = max_sequence + 1
+
             # --- Logic to determine next state and command based on completed task ---
             if (
                 current_saga_state == DeliverableSagaState.MODELING_PENDING
-                and event.task_type == "modeling"
+                and event.task_type == "MODELING"
             ):
                 next_state = DeliverableSagaState.MODELING_COMPLETED
                 # After modeling is completed, the next step is to generate a review item
@@ -319,26 +337,62 @@ class DeliverableSagaOrchestrator:
                 next_command = GenerateReviewItemCommand(
                     project_id=event.project_id,
                     deliverable_id=event.deliverable_id,
-                    review_item_type="static_render",  # Type of review item
-                    asset_urls=[
-                        "http://example.com/placeholder_render.jpg"
-                    ],  # Placeholder URL for the generated render
+                    review_item_type="STATIC_RENDER",  # Business-specific type for modeling reviews
+                    item_url="http://example.com/placeholder_render.jpg",  # Placeholder URL for the generated render
+                    sequence_number=next_sequence,  # Add sequence number
                 )
                 command_topic = "deliverable.command.generate_review_item"
                 command_id_to_record = next_command.command_id
 
             elif (
                 current_saga_state == DeliverableSagaState.TEXTURING_PENDING
-                and event.task_type == "texturing"
+                and event.task_type == "TEXTURING"
             ):
                 next_state = DeliverableSagaState.TEXTURING_COMPLETED
-                next_command = InitiateRenderingCommand(
+                # Generate review item for texture work
+                next_command = GenerateReviewItemCommand(
                     project_id=event.project_id,
                     deliverable_id=event.deliverable_id,
-                    render_type="first_draft",
+                    review_item_type="TEXTURE_REVIEW",  # Business-specific type for texture reviews
+                    item_url="http://example.com/placeholder_texture.jpg",
+                    sequence_number=next_sequence,  # Add sequence number
                 )
-                command_topic = "deliverable.command.initiate_rendering"
+                command_topic = "deliverable.command.generate_review_item"
                 command_id_to_record = next_command.command_id
+                
+            elif (
+                current_saga_state == DeliverableSagaState.RENDERING_PENDING
+                and event.task_type == "RENDERING"
+            ):
+                next_state = DeliverableSagaState.RENDERING_COMPLETED
+                # Generate review item for rendering work
+                next_command = GenerateReviewItemCommand(
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    review_item_type="FINAL_RENDER",  # Business-specific type for final renders
+                    item_url="http://example.com/placeholder_final_render.jpg",
+                    sequence_number=next_sequence,  # Add sequence number
+                )
+                command_topic = "deliverable.command.generate_review_item"
+                command_id_to_record = next_command.command_id
+                
+            else:
+                # For any other completed task, create a generic review item
+                # This ensures all task completions trigger review creation
+                
+                # Determine review type based on task type (consistent with new logic)
+                review_item_type = self._get_review_item_type_for_task(event.task_type)
+                
+                next_command = GenerateReviewItemCommand(
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    review_item_type=review_item_type,  # Use mapped type instead of generic
+                    item_url="http://example.com/placeholder_work.jpg",
+                    sequence_number=next_sequence,  # Add sequence number for uniqueness
+                )
+                command_topic = "deliverable.command.generate_review_item"
+                command_id_to_record = next_command.command_id
+                logger.info(f"Creating review item for completed {event.task_type} task {event.task_id}, sequence: {next_sequence}")
             # ... and so on for other task types and transitions
 
             # --- Send Command if determined ---
@@ -358,6 +412,99 @@ class DeliverableSagaOrchestrator:
             logger.info(
                 f"Deliverable SAGA for {event.deliverable_id} transitioned to {next_state.value} after task '{event.task_name}' completion."
             )
+
+    async def on_internal_task_completed_with_media(self, event: InternalTaskCompletedWithMediaEvent):
+        """
+        Handles InternalTaskCompletedWithMediaEvent.
+        Creates multiple review items (one per file) with proper file references.
+        All review items will have the same review_item_type and sequence_number.
+        """
+        logger.info(
+            f"DeliverableSagaOrchestrator: Received InternalTaskCompletedWithMediaEvent for Deliverable {event.deliverable_id}, Task {event.task_id} ({event.task_type}) with {len(event.platform_file_ids)} files"
+        )
+
+        async with self.db_session_factory() as session:
+            saga_state = await self.saga_processor.get_or_create_saga_state(
+                session=session,
+                project_id=event.project_id,
+                deliverable_id=event.deliverable_id,
+                saga_type=SagaType.DELIVERABLE_PRODUCTION,
+                initial_state=DeliverableSagaState.AWAITING_FIRST_DRAFT_REVIEW.value,
+                saga_id=event.deliverable_id,
+            )
+
+            # Idempotency check: Same event ID should not be processed twice
+            if saga_state.last_event_processed_id == str(event.event_id):
+                logger.warning(
+                    f"DeliverableSagaOrchestrator: InternalTaskCompletedWithMediaEvent {event.event_id} already processed for Deliverable {event.deliverable_id}. Idempotent."
+                )
+                return
+
+            # Determine what type of review item to create based on task type
+            review_item_type = self._get_review_item_type_for_task(event.task_type)
+            
+            # Get the next sequence number for this deliverable
+            from sqlalchemy import func, select
+            from src.models.review_item import ReviewItem
+            
+            result = await session.execute(
+                select(func.coalesce(func.max(ReviewItem.sequence_number), 0)).filter(
+                    ReviewItem.deliverable_id == event.deliverable_id
+                )
+            )
+            max_sequence = result.scalar()
+            next_sequence = max_sequence + 1
+
+            # Create one review item per file with the same sequence number and review_item_type
+            for file_id in event.platform_file_ids:
+                generate_review_command = GenerateReviewItemCommand(
+                    project_id=event.project_id,
+                    deliverable_id=event.deliverable_id,
+                    review_item_type=review_item_type,
+                    platform_file_id=file_id,  # Reference to the specific file
+                    sequence_number=next_sequence,  # Same sequence for all files from this task
+                )
+                
+                await self.saga_processor.publish_message(
+                    topic="deliverable.command.generate_review_item",
+                    message_payload=generate_review_command,
+                )
+                
+                logger.info(
+                    f"DeliverableSagaOrchestrator: Sent GenerateReviewItemCommand for file {file_id}, "
+                    f"review type: {review_item_type}, sequence: {next_sequence}"
+                )
+
+            # Update SAGA state to indicate review items are being prepared
+            next_state = DeliverableSagaState.AWAITING_FIRST_DRAFT_REVIEW
+            await self.saga_processor.update_saga_state(
+                session=session,
+                saga_state=saga_state,
+                new_state_enum=next_state,
+                event_id=event.event_id,
+                command_id=None,  # No single command ID since we sent multiple
+            )
+            
+            logger.info(
+                f"Deliverable SAGA for {event.deliverable_id} created {len(event.platform_file_ids)} "
+                f"review items for task '{event.task_name}' and transitioned to {next_state.value}."
+            )
+
+    def _get_review_item_type_for_task(self, task_type: str) -> str:
+        """
+        Maps task types to appropriate review item types.
+        All review items from the same task will have the same type.
+        """
+        task_type_lower = task_type.lower()
+        
+        if "modeling" in task_type_lower:
+            return "STATIC_RENDER"  # Business-specific type for modeling reviews
+        elif "texturing" in task_type_lower:
+            return "TEXTURE_REVIEW"  # Business-specific type for texture reviews
+        elif "rendering" in task_type_lower:
+            return "FINAL_RENDER"  # Business-specific type for final renders
+        else:
+            return "WORK_REVIEW"  # Business-specific type for general work reviews
 
     async def on_internal_task_failed(self, event: InternalTaskFailedEvent):
         """
@@ -415,11 +562,10 @@ class DeliverableSagaOrchestrator:
                 await self.saga_processor.publish_message(
                     topic="project.deliverable.failed",
                     message_payload=DeliverableFailedEvent(
-                        event_id=uuid.uuid4(),
-                        timestamp=datetime.utcnow(),
                         project_id=event.project_id,
                         deliverable_id=event.deliverable_id,
-                        failure_reason=f"Internal task failed: {event.reason}",
+                        deliverable_name="Unknown",  # We don't have deliverable name in the event
+                        reason=f"Internal task failed: {event.reason}",
                     ),
                 )
 
@@ -495,6 +641,7 @@ class DeliverableSagaOrchestrator:
                     project_id=event.project_id,
                     deliverable_id=event.deliverable_id,
                     output_name=f"Final Output for {event.deliverable_id}",
+                    approved_review_item_id=event.review_item_id,  # Pass the approved review item ID
                 )
                 await self.saga_processor.publish_message(
                     topic="deliverable.command.generate_final_output",
@@ -511,9 +658,11 @@ class DeliverableSagaOrchestrator:
                 )
 
                 # Get the review item to find the associated task
-                review_item = await self.review_item_repository.get_review_item(
-                    event.review_item_id
+                async with self.db_session_factory() as db_session:
+                    result = await db_session.execute(
+                        select(ReviewItem).filter(ReviewItem.id == event.review_item_id)
                 )
+                    review_item = result.scalar_one_or_none()
                 if not review_item:
                     raise ValueError(f"Review item {event.review_item_id} not found")
 
@@ -521,7 +670,7 @@ class DeliverableSagaOrchestrator:
                 command = CreateReworkTaskCommand(
                     project_id=event.project_id,
                     deliverable_id=event.deliverable_id,
-                    original_task_id=review_item.task_id,  # Get task ID from the review item
+                    original_task_id=review_item.source_internal_task_id,  # Get task ID from the review item
                     review_item_id=event.review_item_id,
                     comment_id=event.comment_id,
                     task_name="Rework: General Rework - Client Comment",
@@ -583,11 +732,10 @@ class DeliverableSagaOrchestrator:
                 await self.saga_processor.publish_message(
                     topic="project.deliverable.failed",  # Define this topic
                     message_payload=DeliverableFailedEvent(
-                        event_id=uuid.uuid4(),
-                        timestamp=datetime.utcnow(),
                         project_id=event.project_id,
                         deliverable_id=event.deliverable_id,
-                        failure_reason=f"Deliverable rejected by client: {event.comment_text or 'No reason provided'}",
+                        deliverable_name="Unknown",  # We don't have deliverable name in the event
+                        reason=f"Deliverable rejected by client: {event.comment_text or 'No reason provided'}",
                     ),
                 )
 
@@ -660,7 +808,7 @@ class DeliverableSagaOrchestrator:
             "task_events": "src.events.task_events",
             "client_feedback_events": "src.events.client_feedback_events",
             "project_commands": "src.commands.project_commands",  # StartDeliverableSagaCommand is a command
-            "deliverable_commands": "src.orchestrators.deliverable_saga_orchestrator.commands",  # Specific orchestrator commands
+            "deliverable_commands": "src.commands.deliverable_commands",  # Specific orchestrator commands
             "production_commands": "src.commands.production_commands",  # Specific production commands
         }
 
@@ -794,9 +942,11 @@ class DeliverableSagaOrchestrator:
             )
 
             # Get the review item to find the associated task
-            review_item = await self.review_item_repository.get_review_item(
-                event.review_item_id
+            async with self.db_session_factory() as db_session:
+                result = await db_session.execute(
+                    select(ReviewItem).filter(ReviewItem.id == event.review_item_id)
             )
+                review_item = result.scalar_one_or_none()
             if not review_item:
                 raise ValueError(f"Review item {event.review_item_id} not found")
 
@@ -804,7 +954,7 @@ class DeliverableSagaOrchestrator:
             command = CreateReworkTaskCommand(
                 project_id=event.project_id,
                 deliverable_id=event.deliverable_id,
-                original_task_id=review_item.task_id,  # Get task ID from the review item
+                original_task_id=review_item.source_internal_task_id,  # Get task ID from the review item
                 review_item_id=event.review_item_id,
                 comment_id=event.comment_id,
                 task_name="Rework: General Rework - Client Comment",

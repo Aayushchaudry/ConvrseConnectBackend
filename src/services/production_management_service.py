@@ -113,7 +113,7 @@ class ProductionManagementService:
                 existing_task_query = await session.execute(
                     select(InternalTask).filter(
                         InternalTask.deliverable_id == command.deliverable_id,
-                        InternalTask.task_type == TaskType.MODELING,
+                        InternalTask.task_type == TaskType.MODELING.value,
                     )
                 )
                 if existing_task_query.scalar_one_or_none():
@@ -122,13 +122,20 @@ class ProductionManagementService:
                     )
                     return  # Task already created, just return
 
+                # Handle both string and enum deliverable_type
+                deliverable_type_str = (
+                    deliverable.deliverable_type.value 
+                    if hasattr(deliverable.deliverable_type, 'value') 
+                    else str(deliverable.deliverable_type)
+                )
+
                 new_task = InternalTask(
                     project_id=command.project_id,
                     deliverable_id=command.deliverable_id,
-                    task_name=f"Modeling for {deliverable.deliverable_type.value} {deliverable.deliverable_sub_type or ''}",
-                    task_type=TaskType.MODELING,
-                    status=TaskStatus.TODO,
-                    priority=Priority.HIGH,
+                    task_name=f"Modeling for {deliverable_type_str} {deliverable.deliverable_sub_type or ''}",
+                    task_type=TaskType.MODELING.value,
+                    status=TaskStatus.TODO.value,
+                    priority=Priority.HIGH.value,
                     start_date=datetime.utcnow(),
                 )
                 session.add(new_task)
@@ -141,13 +148,13 @@ class ProductionManagementService:
 
                 # Publish event that a new task was created
                 await self.event_bus.publish(
-                    topic="internal_task.created",  # Define this topic in your config/event_bus.py (or global events file)
+                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
                     message=InternalTaskCreatedEvent(
                         project_id=new_task.project_id,
                         deliverable_id=new_task.deliverable_id,
                         task_id=new_task.id,
                         task_name=new_task.task_name,
-                        task_type=new_task.task_type.value,
+                        task_type=new_task.task_type,
                     ).__dict__,
                 )
             except ValueError as ve:
@@ -162,7 +169,7 @@ class ProductionManagementService:
                 await session.rollback()
                 # Publish InternalTaskFailedEvent
                 await self.event_bus.publish(
-                    topic="internal_task.failed",  # Define this topic
+                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
                     message=InternalTaskFailedEvent(
                         project_id=command.project_id,
                         deliverable_id=command.deliverable_id,
@@ -216,8 +223,8 @@ class ProductionManagementService:
                     task_type=task_type,  # Use original task type
                     parent_task_id=original_task.id if original_task else None,
                     source_review_item_id=command.review_item_id,  # Use review_item_id instead of comment_id
-                    status=TaskStatus.TODO,
-                    priority=Priority.HIGH,
+                    status=TaskStatus.TODO.value,  # Explicitly use .value for database
+                    priority=Priority.HIGH.value,  # Explicitly use .value for database
                     start_date=datetime.utcnow(),
                     description=command.rework_description,
                 )
@@ -231,13 +238,13 @@ class ProductionManagementService:
 
                 # Publish event that a rework task was created
                 await self.event_bus.publish(
-                    topic="internal_task.created",
+                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
                     message=InternalTaskCreatedEvent(
                         project_id=new_rework_task.project_id,
                         deliverable_id=new_rework_task.deliverable_id,
                         task_id=new_rework_task.id,
                         task_name=new_rework_task.task_name,
-                        task_type=new_rework_task.task_type.value,
+                        task_type=new_rework_task.task_type,
                     ).__dict__,
                 )
             except ValueError as ve:
@@ -249,7 +256,7 @@ class ProductionManagementService:
                 )
                 await session.rollback()
                 await self.event_bus.publish(
-                    topic="internal_task.failed",
+                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
                     message=InternalTaskFailedEvent(
                         project_id=command.project_id,
                         deliverable_id=command.deliverable_id,
@@ -306,7 +313,7 @@ class ProductionManagementService:
 
                 # Publish event about task status update
                 await self.event_bus.publish(
-                    topic="internal_task.status_updated",  # Define this topic
+                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
                     message=InternalTaskStatusUpdatedEvent(
                         project_id=task.project_id,
                         deliverable_id=task.deliverable_id,
@@ -331,7 +338,7 @@ class ProductionManagementService:
                 # If task is rejected/terminated, publish InternalTaskFailedEvent (or a specific rejected event)
                 elif new_status_enum == TaskStatus.REJECTED_TERMINATED:
                     await self.event_bus.publish(
-                        topic="internal_task.failed",  # Or specific 'internal_task.rejected'
+                        topic="internal_task.completed",  # Use existing topic that orchestrator listens to
                         message=InternalTaskFailedEvent(
                             project_id=task.project_id,
                             deliverable_id=task.deliverable_id,

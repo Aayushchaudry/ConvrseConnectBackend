@@ -60,6 +60,11 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         Returns:
             bool: True if origin is allowed, False otherwise
         """
+        # Check for wildcard (allow all origins)
+        if "*" in self.allowed_origins:
+            logger.debug(f"Origin {origin} allowed by wildcard (*)")
+            return True
+            
         # Check static allowed origins first
         if origin in self.allowed_origins:
             return True

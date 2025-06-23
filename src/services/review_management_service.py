@@ -31,7 +31,7 @@ from src.models.project import Project
 from src.models.review_item import ReviewItem, ReviewItemType, ReviewStatus
 
 # --- Import Commands Consumed by this Service ---
-from src.orchestrators.deliverable_saga_orchestrator.commands import (
+from src.commands.deliverable_commands import (
     GenerateReviewItemCommand,
 )  # Main command to consume
 
@@ -124,21 +124,53 @@ class ReviewManagementService:
                 if recent_task:
                     source_internal_task_id = recent_task.id
 
-                # Check for idempotency: Avoid creating duplicate review items
-                existing_review_item_query = await session.execute(
-                    select(ReviewItem).filter(
-                        ReviewItem.deliverable_id == command.deliverable_id,
-                        ReviewItem.item_type
-                        == ReviewItemType(command.review_item_type),
-                        ReviewItem.review_round == review_round,
+                # Use sequence_number from command or auto-generate
+                if command.sequence_number is not None:
+                    sequence_number = command.sequence_number
+                else:
+                    # Auto-generate sequence number if not provided
+                    from sqlalchemy import func
+                    result = await session.execute(
+                        select(func.coalesce(func.max(ReviewItem.sequence_number), 0)).filter(
+                            ReviewItem.deliverable_id == command.deliverable_id
+                        )
                     )
-                )
+                    max_sequence = result.scalar()
+                    sequence_number = max_sequence + 1
+
+                # Check for idempotency: Check by platform_file_id and sequence if available
+                if command.platform_file_id:
+                    existing_review_item_query = await session.execute(
+                        select(ReviewItem).filter(
+                            ReviewItem.deliverable_id == command.deliverable_id,
+                            ReviewItem.platform_file_id == command.platform_file_id,
+                            ReviewItem.sequence_number == sequence_number,
+                        )
+                    )
+                else:
+                    # Fallback to old idempotency check for backwards compatibility
+                    existing_review_item_query = await session.execute(
+                        select(ReviewItem).filter(
+                            ReviewItem.deliverable_id == command.deliverable_id,
+                            ReviewItem.item_type == ReviewItemType(command.review_item_type),
+                            ReviewItem.review_round == review_round,
+                        )
+                    )
+                
                 if existing_review_item_query.scalar_one_or_none():
                     logger.warning(
-                        f"Review item for deliverable {command.deliverable_id}, type {command.review_item_type}, round {review_round} already exists. Skipping creation. Idempotent."
+                        f"Review item for deliverable {command.deliverable_id}, type {command.review_item_type}, "
+                        f"file_id {command.platform_file_id}, sequence {sequence_number} already exists. Skipping creation. Idempotent."
                     )
                     return
 
+                # Handle both string and enum deliverable_type
+                deliverable_type_str = (
+                    deliverable.deliverable_type.value 
+                    if hasattr(deliverable.deliverable_type, 'value') 
+                    else str(deliverable.deliverable_type)
+                )
+                
                 new_review_item = ReviewItem(
                     project_id=command.project_id,
                     deliverable_id=command.deliverable_id,
@@ -146,14 +178,12 @@ class ReviewManagementService:
                     item_type=ReviewItemType(
                         command.review_item_type
                     ),  # Convert string to enum
-                    item_url=(
-                        command.asset_urls[0]
-                        if command.asset_urls
-                        else "http://example.com/placeholder.jpg"
-                    ),  # Use first asset URL
-                    description=f"Review for {deliverable.deliverable_type.value} ({command.review_item_type}) - Round {review_round}",
+                    platform_file_id=command.platform_file_id if command.platform_file_id else None,
+                    item_url=command.item_url,  # Use item_url from command (deprecated in favor of file references)
+                    description=f"Review for {deliverable_type_str} ({command.review_item_type}) - Round {review_round}",
+                    sequence_number=sequence_number,
                     review_round=review_round,
-                    review_status=ReviewStatus.PENDING,
+                    review_status=ReviewStatus.PENDING_REVIEW.value,
                     presented_at=datetime.utcnow(),
                 )
                 session.add(new_review_item)
@@ -233,13 +263,11 @@ class ReviewManagementService:
                 # 2. Update the ReviewItem's status based on feedback type
                 old_review_status = review_item.review_status.value
                 if event.feedback_type == FeedbackType.ACCEPT.value:
-                    review_item.review_status = ReviewStatus.ACCEPTED
+                    review_item.review_status = ReviewStatus.APPROVED.value
                 elif event.feedback_type == FeedbackType.REJECT.value:
-                    review_item.review_status = ReviewStatus.REJECTED
+                    review_item.review_status = ReviewStatus.REJECTED.value
                 elif event.feedback_type == FeedbackType.COMMENT.value:
-                    review_item.review_status = (
-                        ReviewStatus.COMMENTED
-                    )  # Or REVISIONS_PENDING, depending on workflow
+                    review_item.review_status = ReviewStatus.NEEDS_REVISION.value
                 elif event.feedback_type == FeedbackType.LIKE.value:
                     # 'Like' might not change review_status, or change to 'CLIENT_LIKED' if that's a status
                     pass

@@ -20,6 +20,7 @@ from src.models.deliverable import Deliverable
 # --- Import Models ---
 from src.models.project import Project
 from src.models.project_output import ProjectOutput  # Import the ProjectOutput model
+from src.models.review_item import ReviewItem  # Import the ReviewItem model
 
 # --- Import Commands Consumed by this Service ---
 from src.orchestrators.deliverable_saga_orchestrator.commands import (
@@ -90,29 +91,52 @@ class DeliveryService:
                     logger.warning(
                         f"Project output '{command.output_name}' already exists for Deliverable {command.deliverable_id}. Skipping creation. Idempotent."
                     )
+                    # Handle both string and enum deliverable_type
+                    deliverable_type_str = (
+                        deliverable.deliverable_type.value 
+                        if hasattr(deliverable.deliverable_type, 'value') 
+                        else str(deliverable.deliverable_type)
+                    )
                     # Still publish delivered event if it's already there
                     await self.event_bus.publish(
                         topic="deliverable.delivered.final",  # This is the topic the Orchestrator expects
                         message=ProjectDeliverableDeliveredEvent(
                             project_id=command.project_id,
                             deliverable_id=command.deliverable_id,
-                            deliverable_name=deliverable.deliverable_type.value,  # Get deliverable type name
+                            deliverable_name=deliverable_type_str,  # Get deliverable type name
                             final_output_url=existing_output.output_url,  # Use existing URL
                         ).__dict__,
                     )
                     return
 
-                # In a real scenario, this is where you'd integrate with:
-                # 1. An asset management system to retrieve the final files.
-                # 2. A cloud storage service (e.g., S3) to upload or get a shareable URL.
-                # For this example, we'll use a dummy URL.
-                dummy_output_url = f"https://your-cloud-storage.com/{command.project_id}/{command.deliverable_id}/{command.output_name.replace(' ', '_').lower()}.zip"
+                # Get the file URL from the approved review item if available
+                output_url = None
+                if command.approved_review_item_id:
+                    # Fetch the approved review item to get its file information
+                    review_item_result = await session.execute(
+                        select(ReviewItem).filter(ReviewItem.id == command.approved_review_item_id)
+                    )
+                    approved_review_item = review_item_result.scalar_one_or_none()
+                    
+                    if approved_review_item:
+                        if approved_review_item.item_url:
+                            output_url = approved_review_item.item_url
+                        elif approved_review_item.platform_file_id:
+                            # Use the platform service view endpoint to construct the proper URL
+                            output_url = f"/api/v1/uploads/view/{approved_review_item.platform_file_id}"
+                        logger.info(f"Using approved review item {command.approved_review_item_id} file as output: {output_url}")
+                    else:
+                        logger.warning(f"Approved review item {command.approved_review_item_id} not found, using dummy URL")
+                
+                # Fallback to dummy URL if no approved review item or file info
+                if not output_url:
+                    output_url = f"https://your-cloud-storage.com/{command.project_id}/{command.deliverable_id}/{command.output_name.replace(' ', '_').lower()}.zip"
 
                 new_project_output = ProjectOutput(
                     project_id=command.project_id,
                     deliverable_id=command.deliverable_id,
                     output_name=command.output_name,
-                    output_url=dummy_output_url,
+                    output_url=output_url,
                     delivery_date=datetime.utcnow(),
                     comments_allowed_on_output=True,  # Default to true for final outputs
                 )
@@ -124,13 +148,20 @@ class DeliveryService:
                     f"DeliveryService: Created new ProjectOutput {new_project_output.id} for Deliverable {command.deliverable_id}."
                 )
 
+                # Handle both string and enum deliverable_type
+                deliverable_type_str = (
+                    deliverable.deliverable_type.value 
+                    if hasattr(deliverable.deliverable_type, 'value') 
+                    else str(deliverable.deliverable_type)
+                )
+
                 # Publish event that the deliverable has been fully delivered
                 await self.event_bus.publish(
                     topic="deliverable.delivered.final",  # This is the topic the Orchestrator expects
                     message=ProjectDeliverableDeliveredEvent(
                         project_id=new_project_output.project_id,
                         deliverable_id=new_project_output.deliverable_id,
-                        deliverable_name=deliverable.deliverable_type.value,  # Get deliverable type name
+                        deliverable_name=deliverable_type_str,  # Get deliverable type name
                         final_output_url=new_project_output.output_url,
                     ).__dict__,
                 )
@@ -138,11 +169,17 @@ class DeliveryService:
                 logger.error(
                     f"DeliveryService Error: Context entity not found for command: {ve}"
                 )
+                # Handle both string and enum deliverable_type for error case
+                deliverable_type_str = (
+                    deliverable.deliverable_type.value 
+                    if deliverable and hasattr(deliverable.deliverable_type, 'value') 
+                    else str(deliverable.deliverable_type) if deliverable else "Unknown"
+                )
                 # Publish DeliverableFailedEvent from Project_events to orchestrator
                 await self._publish_delivery_failed_event(
                     command.project_id,
                     command.deliverable_id,
-                    deliverable.deliverable_type.value if deliverable else "Unknown",
+                    deliverable_type_str,
                     f"Context missing: {str(ve)}",
                 )
             except Exception as e:
@@ -151,11 +188,17 @@ class DeliveryService:
                     exc_info=True,
                 )
                 await session.rollback()
+                # Handle both string and enum deliverable_type for error case
+                deliverable_type_str = (
+                    deliverable.deliverable_type.value 
+                    if deliverable and hasattr(deliverable.deliverable_type, 'value') 
+                    else str(deliverable.deliverable_type) if deliverable else "Unknown"
+                )
                 # Publish DeliverableFailedEvent (from project_events)
                 await self._publish_delivery_failed_event(
                     command.project_id,
                     command.deliverable_id,
-                    deliverable.deliverable_type.value if deliverable else "Unknown",
+                    deliverable_type_str,
                     f"Failed to generate output: {str(e)}",
                 )
 

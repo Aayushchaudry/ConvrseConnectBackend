@@ -1,10 +1,11 @@
 # src/api/review_items/controllers.py
 
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,10 @@ from src.models.review_item import (  # Import ReviewItem models and enums
 from src.services.review_management_service import (
     ReviewManagementService,
 )  # Import your ReviewManagementService
+from src.middleware.auth_middleware import require_auth, AuthContext  # Import auth middleware
+from src.middleware.permissions_middleware import require_permission
+
+logger = logging.getLogger(__name__)
 
 # Create a FastAPI APIRouter instance
 router = APIRouter(tags=["Review Items"])  # Tags for API documentation (Swagger UI)
@@ -59,7 +64,8 @@ class ReviewItemResponse(BaseModel):
     deliverable_id: UUID
     source_internal_task_id: UUID
     item_type: ReviewItemType
-    item_url: str
+    platform_file_id: Optional[UUID] = None  # Add platform_file_id field
+    item_url: Optional[str] = None  # Make optional since it can be None when platform_file_id is used
     description: Optional[str]
     review_status: ReviewStatus
     sequence_number: Optional[int]
@@ -82,7 +88,8 @@ class CreateReviewItemRequest(BaseModel):
     deliverable_id: UUID
     source_internal_task_id: UUID
     item_type: ReviewItemType
-    item_url: str
+    platform_file_id: Optional[UUID] = None  # Optional file reference from platform-service
+    item_url: Optional[str] = None  # Optional URL reference
     description: Optional[str] = None
     sequence_number: Optional[int] = None
     review_round: Optional[int] = 1
@@ -159,9 +166,6 @@ async def submit_feedback_on_review_item(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input: {str(ve)}"
         )
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.error(
             f"Error submitting feedback for review item {review_item_id}: {e}",
             exc_info=True,
@@ -179,6 +183,8 @@ async def submit_feedback_on_review_item(
 async def list_review_items_for_deliverable(
     project_id: UUID,
     deliverable_id: UUID,
+    request: Request,
+    auth_context: AuthContext = Depends(require_auth),
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(
         get_event_bus
@@ -203,7 +209,6 @@ async def list_review_items_for_deliverable(
     review_items = result.scalars().all()
     if not review_items:
         # Optionally raise 404 if no review items exist, or return empty list
-        logger = logging.getLogger(__name__)
         logger.info(
             f"No review items found for deliverable {deliverable_id} in project {project_id}"
         )
@@ -213,6 +218,8 @@ async def list_review_items_for_deliverable(
 @router.get("/review_items/{review_item_id}", response_model=ReviewItemResponse)
 async def get_review_item_details(
     review_item_id: UUID,
+    request: Request,
+    auth_context: AuthContext = Depends(require_auth),
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
 ):
@@ -244,6 +251,8 @@ async def get_review_item_details(
 )
 async def create_review_item(
     review_data: CreateReviewItemRequest,
+    request: Request,
+    auth_context: AuthContext = Depends(require_auth),
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
 ):
@@ -261,7 +270,7 @@ async def create_review_item(
             item_type=review_data.item_type,
             item_url=review_data.item_url,
             description=review_data.description,
-            review_status=ReviewStatus.PENDING,
+            review_status=ReviewStatus.PENDING_REVIEW,
             sequence_number=review_data.sequence_number,
             review_round=review_data.review_round,
             presented_at=datetime.utcnow(),
@@ -274,9 +283,6 @@ async def create_review_item(
         return review_item
 
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.error(f"Error creating review item: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -288,6 +294,8 @@ async def create_review_item(
 async def assign_reviewer(
     review_item_id: UUID,
     assign_data: AssignReviewerRequest,
+    request: Request,
+    auth_context: AuthContext = Depends(require_auth),
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
 ):
@@ -317,9 +325,6 @@ async def assign_reviewer(
     except HTTPException:
         raise
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.error(f"Error assigning reviewer: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -331,6 +336,8 @@ async def assign_reviewer(
 async def submit_review_feedback(
     review_item_id: UUID,
     feedback_data: ReviewFeedbackRequest,
+    request: Request,
+    auth_context: AuthContext = Depends(require_auth),
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
 ):
@@ -368,9 +375,6 @@ async def submit_review_feedback(
     except HTTPException:
         raise
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.error(f"Error submitting feedback: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

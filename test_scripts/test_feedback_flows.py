@@ -69,7 +69,7 @@ class TestFeedbackFlows:
                 project_id=self.project_id,
                 deliverable_id=self.deliverable_id,
                 review_type=ReviewItemType.STATIC_RENDER,
-                review_status=ReviewStatus.PENDING,
+                review_status=ReviewStatus.PENDING_REVIEW,
                 asset_url="http://example.com/test.jpg"
             )
             session.add(review_item)

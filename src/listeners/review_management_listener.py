@@ -11,7 +11,7 @@ from src.config.settings import settings
 from src.events.event_bus_interface import EventBus
 
 # --- Import Commands Consumed by this Listener ---
-from src.orchestrators.deliverable_saga_orchestrator.commands import (
+from src.commands.deliverable_commands import (
     GenerateReviewItemCommand,
 )  # Main command to consume
 from src.services.review_management_service import (
@@ -81,12 +81,10 @@ async def _listen_loop(consumer: Any, service_instance: ReviewManagementService)
                 command_obj = None
 
                 # Import command dataclasses dynamically to reconstruct the object
-                from src.orchestrators.deliverable_saga_orchestrator import (
-                    commands as deliverable_saga_commands,
-                )
+                from src.commands import deliverable_commands
 
                 if command_type == "GenerateReviewItemCommand":
-                    command_obj = deliverable_saga_commands.GenerateReviewItemCommand(
+                    command_obj = deliverable_commands.GenerateReviewItemCommand(
                         **command_data
                     )
                     handler_method = (

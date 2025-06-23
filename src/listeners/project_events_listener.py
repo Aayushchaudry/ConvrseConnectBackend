@@ -25,6 +25,14 @@ DELIVERABLE_REPORT_TOPICS = [
     "deliverable.failed",
 ]  # Topics from colleague's Deliverable SAGA
 
+# Topics for automatic project status progression
+PROJECT_PROGRESSION_TOPICS = [
+    "internal_task.completed",          # Task completion triggers progression to in_progress
+    "internal_task.completed_with_media", # Task completion with files triggers progression to in_progress  
+    "internal_task.status.updated",     # Task status changes (e.g., to in-progress)
+    "requirement.updated",              # Requirement completion triggers progression to in_progress
+]
+
 
 async def start_listening(event_bus: EventBus):
     """
@@ -32,7 +40,7 @@ async def start_listening(event_bus: EventBus):
     and dispatching them to the ProjectLifecycleOrchestrator.
     """
     logger.info(
-        f"Project Events Listener starting for topic(s): {PROJECT_EVENTS_TOPIC} and {DELIVERABLE_REPORT_TOPICS}"
+        f"Project Events Listener starting for topic(s): {PROJECT_EVENTS_TOPIC}, {DELIVERABLE_REPORT_TOPICS}, and {PROJECT_PROGRESSION_TOPICS}"
     )
 
     # Create an instance of the ProjectLifecycleOrchestrator
@@ -54,12 +62,21 @@ async def start_listening(event_bus: EventBus):
         group_id=settings.KAFKA_CONSUMER_GROUP_ID + "-deliverable-reporter",
     )
 
+    # Get a consumer for project progression events (task completions, requirement updates)
+    project_progression_consumer = event_bus.get_consumer(
+        topic=PROJECT_PROGRESSION_TOPICS,  # Listen to all progression topics
+        group_id=settings.KAFKA_CONSUMER_GROUP_ID + "-project-progression",
+    )
+
     # Start the consumers
     await project_created_consumer.start()
     logger.info(f"Started consumer for topic: {PROJECT_EVENTS_TOPIC}")
 
     await deliverable_report_consumer.start()
     logger.info(f"Started consumer for topic: {DELIVERABLE_REPORT_TOPICS[0]}")
+
+    await project_progression_consumer.start()
+    logger.info(f"Started consumer for topics: {PROJECT_PROGRESSION_TOPICS}")
 
     # Start separate async tasks for each consumer loop
     # Using 'asyncio.create_task' ensures these run in the background
@@ -70,9 +87,12 @@ async def start_listening(event_bus: EventBus):
     deliverable_report_task = asyncio.create_task(
         _listen_loop(deliverable_report_consumer, project_orchestrator.handle_event)
     )
+    project_progression_task = asyncio.create_task(
+        _listen_loop(project_progression_consumer, project_orchestrator.handle_event)
+    )
 
     # Keep these tasks running indefinitely or until cancelled
-    await asyncio.gather(project_created_task, deliverable_report_task)
+    await asyncio.gather(project_created_task, deliverable_report_task, project_progression_task)
 
 
 async def _listen_loop(consumer: Any, handler: Callable[[Dict[str, Any]], Any]):

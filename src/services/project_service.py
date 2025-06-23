@@ -40,7 +40,7 @@ class ProjectService:
         budget: float,
         start_date: str,
         end_date: str,
-        business_id: int,
+        business_id: str,
         created_by: str,
         assigned_to: Optional[str] = None,
     ) -> Project:
@@ -52,7 +52,7 @@ class ProjectService:
             budget (float): The budget for the project.
             start_date (str): The project's start date (as string, will be parsed).
             end_date (str): The project's end date (as string, will be parsed).
-            business_id (int): The business ID that owns this project.
+            business_id (str): The business ID that owns this project.
             created_by (str): The user ID (UUID) who created this project.
             assigned_to (Optional[str]): The user ID (UUID) of the project manager assigned to this project.
 
@@ -80,7 +80,7 @@ class ProjectService:
             business_id=business_id,
             created_by=created_by,
             assigned_to=assigned_to,
-            status=ProjectStatus.INITIATED,
+            status=ProjectStatus.INITIATED.value,
         )
 
         self.db_session.add(new_project)
@@ -94,7 +94,7 @@ class ProjectService:
         event = ProjectCreatedEvent(
             project_id=new_project.id,
             project_name=new_project.name,
-            initial_status=new_project.status.value,
+            initial_status=new_project.status,
         )
 
         logger.info(f"ProjectCreatedEvent created: {event}")

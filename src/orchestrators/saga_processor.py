@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.events.event_bus_interface import EventBus
@@ -58,7 +58,8 @@ class SagaProcessor:
         # For DELIVERABLE_PRODUCTION, deliverable_id is required
 
         query = select(SagaState).filter(
-            SagaState.project_id == project_id, SagaState.saga_type == saga_type
+            SagaState.project_id == project_id, 
+            cast(SagaState.saga_type, String) == saga_type.value
         )
         if deliverable_id:
             query = query.filter(SagaState.deliverable_id == deliverable_id)
@@ -78,7 +79,7 @@ class SagaProcessor:
                 project_id=project_id,
                 deliverable_id=deliverable_id,
                 current_state=initial_state,
-                status=SagaStatus.IN_PROGRESS,
+                status=SagaStatus.IN_PROGRESS.value,
             )
             session.add(new_saga_state)
             await session.commit()
@@ -123,14 +124,14 @@ class SagaProcessor:
             saga_state.last_command_sent_timestamp = datetime.utcnow()
 
         if new_saga_status:
-            saga_state.status = new_saga_status
+            saga_state.status = new_saga_status.value  # Convert enum to value for database storage
 
         saga_state.updated_at = datetime.utcnow()
         session.add(saga_state)  # Re-add for update tracking if not already attached
         await session.commit()
         await session.refresh(saga_state)
         logger.info(
-            f"SAGA {saga_state.saga_id} (Type: {saga_state.saga_type.value}) state updated to '{new_state_enum.value}'. Status: {saga_state.status.value}"
+            f"SAGA {saga_state.saga_id} (Type: {saga_state.saga_type}) state updated to '{new_state_enum.value}'. Status: {saga_state.status}"
         )
 
     async def publish_message(self, topic: str, message_payload: Any):

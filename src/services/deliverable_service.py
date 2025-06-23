@@ -46,8 +46,8 @@ class DeliverableService:
         deliverable_type: DeliverableType,
         deliverable_sub_type: Optional[str] = None,
         tentative_timeline_days: Optional[int] = None,
-        created_by: int = 1,
-        assigned_to: Optional[int] = None,
+        created_by: Optional[UUID] = None,
+        assigned_to: Optional[UUID] = None,
     ) -> Deliverable:
         """
         Creates a new deliverable in the database.
@@ -80,10 +80,10 @@ class DeliverableService:
         # 2. Create the Deliverable ORM object
         new_deliverable = Deliverable(
             project_id=project_id,
-            deliverable_type=deliverable_type,
+            deliverable_type=deliverable_type.value,  # Use .value for string enum, consistent with current_status
             deliverable_sub_type=deliverable_sub_type,
             tentative_timeline_days=tentative_timeline_days,
-            current_status=DeliverableStatus.INFO_GATHERING,  # Initial status for new deliverables
+            current_status=DeliverableStatus.INFO_GATHERING.value,  # Use .value for string enum
             created_by=created_by,
             assigned_to=assigned_to,
         )
@@ -96,7 +96,7 @@ class DeliverableService:
         )  # Refresh to get ID and other auto-generated fields
 
         logger.info(
-            f"✅ Deliverable created: ID={new_deliverable.id}, Type={new_deliverable.deliverable_type.value}, Project={new_deliverable.project_id}"
+            f"✅ Deliverable created: ID={new_deliverable.id}, Type={new_deliverable.deliverable_type}, Project={new_deliverable.project_id}"
         )
 
         # 4. Trigger information gathering for this deliverable

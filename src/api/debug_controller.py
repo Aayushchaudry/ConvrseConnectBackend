@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.commands.project_commands import StartInformationGatheringCommand
-from src.config.database import get_db_session
+from src.config.database import AsyncSessionLocal, get_db_session
 from src.config.event_bus import get_event_bus
 from src.events.client_feedback_events import ClientFeedbackSubmittedEvent
 from src.events.event_bus_interface import EventBus
@@ -52,7 +52,9 @@ async def trigger_info_gathering_debug(
         )
 
         # Create the service and command
-        info_gathering_service = InformationGatheringService(db_session, event_bus)
+        info_gathering_service = InformationGatheringService(
+            db_session_factory=AsyncSessionLocal, event_bus=event_bus
+        )
         command = StartInformationGatheringCommand(
             project_id=request.project_id, deliverable_ids=request.deliverable_ids
         )
@@ -114,7 +116,9 @@ async def submit_client_feedback_debug(
         )
 
         # Trigger the deliverable SAGA orchestrator directly
-        deliverable_orchestrator = DeliverableSagaOrchestrator(db_session, event_bus)
+        deliverable_orchestrator = DeliverableSagaOrchestrator(
+            db_session_factory=AsyncSessionLocal, event_bus=event_bus
+        )
         await deliverable_orchestrator.on_client_feedback_submitted(feedback_event)
 
         logger.info(f"🔧 DEBUG: Client feedback processed successfully")
