@@ -20,6 +20,10 @@ from src.api.requirements.controllers import router as requirements_router
 from src.api.review_items.controllers import router as review_items_router
 from src.api.websocket_controller import router as websocket_router
 from src.api.copilot.controllers import router as copilot_router
+# Phase 3 API imports
+from src.api.task_management.controllers import router as task_management_router
+from src.api.pricing.controllers import router as pricing_router
+from src.api.timeline.controllers import router as timeline_router
 from src.config.database import init_db
 from src.config.event_bus import close_event_bus, get_event_bus
 from src.config.settings import settings
@@ -212,6 +216,10 @@ app.include_router(project_outputs_router, prefix="/api/v1")
 app.include_router(integration_router, prefix="/api/v1")
 app.include_router(debug_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
+# Phase 3 API routers
+app.include_router(task_management_router, prefix="/api/v1")
+app.include_router(pricing_router, prefix="/api/v1")
+app.include_router(timeline_router, prefix="/api/v1")
 app.include_router(copilot_router)
 app.include_router(websocket_router)
 

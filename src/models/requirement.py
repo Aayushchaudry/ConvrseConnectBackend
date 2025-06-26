@@ -52,7 +52,7 @@ class Requirement(Base):
 
     # Foreign Keys linking to the Deliverable and Project
     deliverable_id = Column(
-        UUID(as_uuid=True), ForeignKey("connect_backend.deliverables.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("connect_backend.deliverables.id"), nullable=True  # Made nullable for project-level requirements
     )
     project_id = Column(
         UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False
@@ -79,6 +79,10 @@ class Requirement(Base):
 
     # Additional notes or context for the requirement
     notes = Column(Text, nullable=True)
+
+    # New fields for enhanced requirement management
+    is_project_level = Column(Boolean, default=False, nullable=False)  # True if requirement applies to entire project
+    template_id = Column(UUID(as_uuid=True), nullable=True)  # Reference to requirement template if auto-generated
 
     # Automatic timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)

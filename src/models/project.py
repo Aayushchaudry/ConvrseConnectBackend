@@ -53,6 +53,12 @@ class Project(Base):
         DECIMAL(10, 2), nullable=True
     )  # Total budget for the project, e.g., 3422020.00
 
+    # New fields for enhanced budget tracking
+    calculated_budget = Column(DECIMAL(12, 2), nullable=True)  # Auto-calculated from deliverable pricing
+    actual_cost = Column(DECIMAL(12, 2), default=0, nullable=False)  # Actual costs incurred
+    budget_variance = Column(DECIMAL(12, 2), default=0, nullable=False)  # Difference between budget and actual
+    budget_last_calculated = Column(DateTime, nullable=True)  # When budget was last recalculated
+
     # Timelines - end_date instead of due_date
     start_date = Column(DateTime, nullable=True)
     end_date = Column(

@@ -3,7 +3,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Text, Boolean, DECIMAL, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -98,6 +98,12 @@ class InternalTask(Base):
     actual_end_date = Column(DateTime, nullable=True)  # Actual completion time
 
     description = Column(Text, nullable=True)  # Detailed description of the task
+
+    # New fields for enhanced task management
+    estimated_hours = Column(DECIMAL(8, 2), nullable=True)  # Estimated hours for task completion
+    actual_hours = Column(DECIMAL(8, 2), nullable=True)  # Actual hours spent on task
+    is_project_level = Column(Boolean, default=False, nullable=False)  # True if task applies to entire project
+    task_template_id = Column(UUID(as_uuid=True), nullable=True)  # Reference to task template if created from template
 
     # Source of the task, e.g., if it was created due to feedback on a specific ReviewItem
     source_review_item_id = Column(
