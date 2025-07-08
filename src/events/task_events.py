@@ -45,11 +45,39 @@ class InternalTaskCreatedEvent(BaseEvent):
         task_name: str,
         task_type: str,
         assigned_to_user_id: Optional[UUID] = None,
+        event_id: UUID = None,
+        timestamp: datetime = None,
+        event_type: str = None,
     ):
+        # Allow event_id and timestamp to be passed for deserialization
+        if event_id is None:
+            event_id = uuid.uuid4()
+        elif isinstance(event_id, str):
+            event_id = UUID(event_id)
+
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+        elif isinstance(timestamp, str):
+            # Parse ISO format timestamp from Kafka
+            timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+        if event_type is None:
+            event_type = "InternalTaskCreatedEvent"
+
+        # Convert UUIDs from strings if needed
+        if isinstance(project_id, str):
+            project_id = UUID(project_id)
+        if isinstance(deliverable_id, str):
+            deliverable_id = UUID(deliverable_id)
+        if isinstance(task_id, str):
+            task_id = UUID(task_id)
+        if assigned_to_user_id is not None and isinstance(assigned_to_user_id, str):
+            assigned_to_user_id = UUID(assigned_to_user_id)
+
         super().__init__(
-            event_id=uuid.uuid4(),
-            timestamp=datetime.utcnow(),
-            event_type="InternalTaskCreatedEvent",
+            event_id=event_id,
+            timestamp=timestamp,
+            event_type=event_type,
         )
         self.project_id = project_id
         self.deliverable_id = deliverable_id

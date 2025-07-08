@@ -43,6 +43,9 @@ class ProjectService:
         business_id: str,
         created_by: str,
         assigned_to: Optional[str] = None,
+        deliverable_types: Optional[List[str]] = None,
+        deliverable_sub_types: Optional[Dict[str, str]] = None,
+        deliverable_timeline_days: Optional[Dict[str, int]] = None,
     ) -> Project:
         """
         Creates a new project in the database and publishes a ProjectCreatedEvent.
@@ -55,11 +58,15 @@ class ProjectService:
             business_id (str): The business ID that owns this project.
             created_by (str): The user ID (UUID) who created this project.
             assigned_to (Optional[str]): The user ID (UUID) of the project manager assigned to this project.
+            deliverable_types (Optional[List[str]]): List of deliverable types for orchestrator to auto-create.
+            deliverable_sub_types (Optional[Dict[str, str]]): Dictionary of deliverable subtypes for each deliverable type.
+            deliverable_timeline_days (Optional[Dict[str, int]]): Dictionary of deliverable timeline days for each deliverable type.
 
         Returns:
             Project: The newly created Project ORM object.
         """
-        logger.info(f"Creating new project: {name}")
+        logger.info(f"🔄 ProjectService - Creating new project: {name}")
+        logger.info(f"🔄 ProjectService - Deliverable types for orchestration: {deliverable_types}")
 
         # For simplicity, parsing dates here. In a real app,
         # you might do this in a Pydantic schema or a dedicated helper.
@@ -87,30 +94,34 @@ class ProjectService:
         await self.db_session.commit()
         await self.db_session.refresh(new_project)
 
-        logger.info(f"Project created in database: {new_project.id}")
+        logger.info(f"✅ ProjectService - Project created in database: {new_project.id}")
 
         # Create and publish the ProjectCreatedEvent for SAGA orchestration
-        logger.info(f"Creating ProjectCreatedEvent for project {new_project.id}")
+        logger.info(f"🔄 ProjectService - Creating ProjectCreatedEvent with deliverable types for project {new_project.id}")
         event = ProjectCreatedEvent(
             project_id=new_project.id,
             project_name=new_project.name,
             initial_status=new_project.status,
+            deliverable_types=deliverable_types or [],
+            deliverable_sub_types=deliverable_sub_types or {},
+            deliverable_timeline_days=deliverable_timeline_days or {},
         )
 
-        logger.info(f"ProjectCreatedEvent created: {event}")
-        logger.info(f"Event dict: {event.__dict__}")
+        logger.info(f"🔄 ProjectService - ProjectCreatedEvent created with deliverables: {event.deliverable_types}")
+        logger.info(f"🔄 ProjectService - Event dict: {event.__dict__}")
 
         try:
-            logger.info(f"Publishing event to topic 'project.created'...")
+            logger.info(f"🔄 ProjectService - Publishing event to topic 'project.created'...")
             await self.event_bus.publish(
                 topic="project.created", message=event.__dict__
             )
             logger.info(
-                f"✅ ProjectCreatedEvent published successfully to topic 'project.created' for project {new_project.id} ({new_project.name})"
+                f"✅ ProjectService - ProjectCreatedEvent published successfully to 'project.created' for project {new_project.id} ({new_project.name})"
             )
+            logger.info(f"✅ ProjectService - Orchestrator will auto-create {len(deliverable_types or [])} deliverable types")
         except Exception as e:
             logger.error(
-                f"❌ Failed to publish ProjectCreatedEvent for project {new_project.id}: {e}"
+                f"❌ ProjectService - Failed to publish ProjectCreatedEvent for project {new_project.id}: {e}"
             )
             logger.error(f"Event bus type: {type(self.event_bus)}")
             logger.error(f"Event dict: {event.__dict__}")

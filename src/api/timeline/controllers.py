@@ -537,14 +537,16 @@ async def create_project_milestone(
         # Create milestone
         milestone = await timeline_service.create_project_milestones(
             project_id=project_id,
-            custom_milestones=[{
-                "phase_name": milestone_data.phase_name,
-                "planned_start_date": milestone_data.planned_start_date,
-                "planned_end_date": milestone_data.planned_end_date,
-                "dependencies": milestone_data.dependencies,
-                "phase_order": milestone_data.phase_order,
-                "is_milestone": True,
-            }]
+            milestone_config={
+                "milestones": [{
+                    "phase_name": milestone_data.phase_name,
+                    "planned_start_date": milestone_data.planned_start_date,
+                    "planned_end_date": milestone_data.planned_end_date,
+                    "dependencies": milestone_data.dependencies,
+                    "phase_order": milestone_data.phase_order,
+                    "is_milestone": True,
+                }]
+            }
         )
         
         # Return the first (and only) created milestone

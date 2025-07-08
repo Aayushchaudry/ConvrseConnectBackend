@@ -95,55 +95,69 @@ class ProductionManagementService:
 
     async def handle_initiate_modeling_command(self, command: InitiateModelingCommand):
         """
-        Handles InitiateModelingCommand to create a modeling task.
+        Handles the InitiateModelingCommand to create a modeling task.
+        Creates project-level modeling task (once per project) instead of per deliverable.
         """
         logger.info(
-            f"ProductionManagementService: Received InitiateModelingCommand for Deliverable {command.deliverable_id}"
+            f"ProductionManagementService: Received InitiateModelingCommand for Project {command.project_id}, Deliverable {command.deliverable_id}"
         )
 
         async with self.db_session_factory() as session:
             try:
+                # Validate project and deliverable exist
                 project, deliverable = await self._get_deliverable_and_project(
                     session, command.deliverable_id, command.project_id
                 )
 
-                # Check if modeling task already exists for idempotency
+                # Check if a project-level modeling task already exists
                 from sqlalchemy import select
 
-                existing_task_query = await session.execute(
+                existing_task = await session.execute(
                     select(InternalTask).filter(
-                        InternalTask.deliverable_id == command.deliverable_id,
+                        InternalTask.project_id == command.project_id,
                         InternalTask.task_type == TaskType.MODELING.value,
+                        InternalTask.is_project_level == True,
+                        InternalTask.deliverable_id.is_(None),  # Project-level tasks have no deliverable_id
                     )
                 )
-                if existing_task_query.scalar_one_or_none():
-                    logger.warning(
-                        f"Modeling task already exists for Deliverable {command.deliverable_id}. Skipping creation. Idempotent."
+                existing_modeling_task = existing_task.scalar_one_or_none()
+
+                if existing_modeling_task:
+                    logger.info(
+                        f"✅ Project-level modeling task already exists: {existing_modeling_task.id} for project {command.project_id}. Skipping creation."
                     )
-                    return  # Task already created, just return
+                    
+                    # Publish event for existing task (to maintain workflow consistency)
+                    await self.event_bus.publish(
+                        topic="internal_task.completed",  # Use existing topic that orchestrator listens to
+                        message=InternalTaskCreatedEvent(
+                            project_id=existing_modeling_task.project_id,
+                            deliverable_id=command.deliverable_id,  # Keep original deliverable_id for context
+                            task_id=existing_modeling_task.id,
+                            task_name=existing_modeling_task.task_name,
+                            task_type=existing_modeling_task.task_type,
+                        ).__dict__,
+                    )
+                    return
 
-                # Handle both string and enum deliverable_type
-                deliverable_type_str = (
-                    deliverable.deliverable_type.value 
-                    if hasattr(deliverable.deliverable_type, 'value') 
-                    else str(deliverable.deliverable_type)
-                )
-
+                # Create new project-level modeling task
                 new_task = InternalTask(
                     project_id=command.project_id,
-                    deliverable_id=command.deliverable_id,
-                    task_name=f"Modeling for {deliverable_type_str} {deliverable.deliverable_sub_type or ''}",
+                    deliverable_id=None,  # Project-level task
+                    task_name=f"Project Modeling - {project.name}",
                     task_type=TaskType.MODELING.value,
                     status=TaskStatus.TODO.value,
                     priority=Priority.HIGH.value,
                     start_date=datetime.utcnow(),
+                    is_project_level=True,  # Mark as project-level
+                    description=f"3D modeling work for all deliverables in project {project.name}",
                 )
                 session.add(new_task)
                 await session.commit()
                 await session.refresh(new_task)
 
                 logger.info(
-                    f"ProductionManagementService: Created new Modeling task: {new_task.id} for Deliverable {command.deliverable_id}"
+                    f"✅ ProductionManagementService: Created new project-level modeling task: {new_task.id} for project {command.project_id}"
                 )
 
                 # Publish event that a new task was created
@@ -151,7 +165,7 @@ class ProductionManagementService:
                     topic="internal_task.completed",  # Use existing topic that orchestrator listens to
                     message=InternalTaskCreatedEvent(
                         project_id=new_task.project_id,
-                        deliverable_id=new_task.deliverable_id,
+                        deliverable_id=command.deliverable_id,  # Keep original deliverable_id for context
                         task_id=new_task.id,
                         task_name=new_task.task_name,
                         task_type=new_task.task_type,

@@ -52,6 +52,10 @@ from src.listeners.review_management_listener import (
     start_listening as start_review_management_listener,
 )
 
+# --- PHASE 4 INTEGRATION IMPORTS ---
+from src.orchestrators.integration_hooks import create_phase4_integration_hooks
+from src.config.database import AsyncSessionLocal
+
 # --- AUTH INTEGRATION IMPORTS ---
 from src.middleware.auth_middleware import AuthenticationMiddleware
 from src.middleware.cors_middleware import DynamicCORSMiddleware
@@ -64,6 +68,7 @@ background_tasks: List[asyncio.Task] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("🚨 [LIFESPAN] Entered FastAPI lifespan context manager - startup sequence begins.")
     """
     Lifespan context manager for FastAPI application.
     Handles startup and shutdown events.
@@ -82,6 +87,14 @@ async def lifespan(app: FastAPI):
         logger.info("Initializing event bus...")
         event_bus = await get_event_bus()
         logger.info("Event bus initialized successfully.")
+
+        # Initialize Phase 4 Integration Hooks for enhanced orchestration
+        logger.info("Initializing Phase 4 integration hooks...")
+        phase4_hooks = create_phase4_integration_hooks(
+            db_session_factory=AsyncSessionLocal,
+            event_bus=event_bus
+        )
+        logger.info("Phase 4 integration hooks initialized successfully.")
 
         # 2. Initialize Auth Service Client
         try:
@@ -149,6 +162,14 @@ async def lifespan(app: FastAPI):
         )
         background_tasks.append(delivery_listener_task)
         logger.info("Delivery Listener started in background.")
+
+        # Project Events Listener (FOR ORCHESTRATION)
+        logger.info("Starting Project Events Listener...")
+        project_events_listener_task = asyncio.create_task(
+            start_project_events_listener(event_bus)
+        )
+        background_tasks.append(project_events_listener_task)
+        logger.info("Project Events Listener started in background.")
 
     except Exception as e:
         logger.error(f"Failed to initialize Event Bus or start listeners: {e}")

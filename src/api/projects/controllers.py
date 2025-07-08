@@ -48,6 +48,18 @@ class CreateProjectRequest(BaseModel):
     end_date: date = Field(..., description="Project end date (YYYY-MM-DD)")
     business_id: Optional[str] = Field(None, description="Target business ID (for convrse platform users creating projects for clients)")
     assigned_to: Optional[str] = Field(None, description="User ID (UUID) of the project manager assigned to this project")
+    deliverable_types: Optional[list[str]] = Field(
+        default=[], 
+        description="List of deliverable types to be auto-created by orchestrator (e.g., ['rendered_images', 'vr_tour'])"
+    )
+    deliverable_sub_types: Optional[dict[str, str]] = Field(
+        default={},
+        description="Dictionary mapping deliverable types to their sub types (e.g., {'rendered_images': 'exterior', 'vr_tour': 'interior'})"
+    )
+    deliverable_timeline_days: Optional[dict[str, int]] = Field(
+        default={},
+        description="Dictionary mapping deliverable types to their custom timeline days (e.g., {'rendered_images': 14, 'vr_tour': 21})"
+    )
 
     # Example of optional fields if you want to include them in creation
     # payment_option: Optional[str] = Field(None, description="Chosen payment option for the project")
@@ -69,9 +81,7 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
 
     class Config:
-        orm_mode = (
-            True  # Enables Pydantic to read directly from ORM models (SQLAlchemy)
-        )
+        from_attributes = True  # Updated from orm_mode for Pydantic V2
 
 
 # --- API Endpoints ---
@@ -88,12 +98,15 @@ async def create_project(
 ):
     """
     Creates a new project and initiates the Project Lifecycle SAGA.
+    Backend orchestration: deliverables will be auto-created via ProjectCreatedEvent.
     Requires 'projects.create' permission.
     """
 
     try:
-        # Validate the input data
-        logger.info(f"Creating project with data: {project_data}")
+        # Log the backend orchestration process
+        logger.info(f"🛠️ Backend orchestration - Creating project: {project_data.name}")
+        logger.info(f"🛠️ Backend orchestration - Deliverable types: {project_data.deliverable_types}")
+        logger.info(f"🛠️ Backend orchestration - Full request data: {project_data}")
         
         # Create an instance of ProjectService
         project_service = ProjectService(db_session=db_session, event_bus=event_bus)
@@ -109,7 +122,7 @@ async def create_project(
         if not isinstance(created_by, str) or not created_by.strip():
             created_by = "default-user-id"
 
-        logger.info(f"Using business_id: {business_id}, created_by: {created_by}")
+        logger.info(f"🛠️ Backend orchestration - Using business_id: {business_id}, created_by: {created_by}")
 
         # Call the service method to create the project and publish the event
         # Convert date objects from Pydantic to string for now, ProjectService expects string based on current code
@@ -122,20 +135,26 @@ async def create_project(
             business_id=business_id,
             created_by=created_by,
             assigned_to=project_data.assigned_to,  # Project manager user ID (UUID)
+            deliverable_types=project_data.deliverable_types or [],  # Pass deliverable types for orchestration
+            deliverable_sub_types=project_data.deliverable_sub_types or {},  # Pass sub types for orchestration
+            deliverable_timeline_days=project_data.deliverable_timeline_days or {},  # Pass timeline days
         )
+
+        logger.info(f"✅ Backend orchestration - Project created: {created_project.id}")
+        logger.info(f"✅ Backend orchestration - ProjectCreatedEvent will trigger deliverable creation")
 
         # Return the created project (Pydantic will automatically convert ORM model)
         return created_project
     except ValueError as ve:
         # Log the specific validation error
-        logger.error(f"Validation error creating project: {ve}", exc_info=True)
+        logger.error(f"❌ Backend orchestration - Validation error: {ve}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Validation error: {str(ve)}",
         )
     except Exception as e:
         # Log the error for debugging
-        logger.error(f"Error creating project: {e}", exc_info=True)
+        logger.error(f"❌ Backend orchestration - Error creating project: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create project: {str(e)}",

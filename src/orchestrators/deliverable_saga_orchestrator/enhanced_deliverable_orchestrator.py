@@ -26,9 +26,8 @@ class EnhancedDeliverableSagaOrchestrator:
     def __init__(self, db_session_factory: Callable[[], AsyncSession]):
         self.db_session_factory = db_session_factory
         
-        # Initialize Phase 2 Services
-        self.task_management_service = TaskManagementService()
-        self.pricing_service = PricingService()
+        # Don't initialize services here since they require db_session
+        # Services will be created in individual methods when needed
 
     async def on_deliverable_info_gathered_enhanced(self, event: DeliverableInfoGatheredEvent):
         """Enhanced deliverable info gathering with task sharing and pricing setup."""
@@ -36,14 +35,17 @@ class EnhancedDeliverableSagaOrchestrator:
         
         async with self.db_session_factory() as session:
             try:
+                # Create services with session
+                task_management_service = TaskManagementService(session)
+                pricing_service = PricingService(session)
+                
                 # Check for existing similar tasks in the project that can be shared
                 deliverable = await session.get(Deliverable, event.deliverable_id)
                 if not deliverable:
                     return
                 
                 # Find existing tasks in the project that could be shared
-                shared_tasks = await self.task_management_service.get_shared_tasks_for_project(
-                    session=session,
+                shared_tasks = await task_management_service.get_shared_tasks_for_project(
                     project_id=event.project_id
                 )
                 
@@ -52,8 +54,7 @@ class EnhancedDeliverableSagaOrchestrator:
                     for task in shared_tasks:
                         # Check if this task type is relevant for the deliverable
                         if self._is_task_relevant_for_deliverable(task, deliverable):
-                            await self.task_management_service.associate_task_with_deliverable(
-                                session=session,
+                            await task_management_service.associate_task_with_deliverable(
                                 task_id=task.id,
                                 deliverable_id=event.deliverable_id,
                                 estimated_hours=8  # Default estimation
@@ -62,8 +63,7 @@ class EnhancedDeliverableSagaOrchestrator:
                 
                 # Set up default pricing for this deliverable if not exists
                 try:
-                    await self.pricing_service.create_deliverable_pricing(
-                        session=session,
+                    await pricing_service.create_deliverable_pricing(
                         project_id=event.project_id,
                         deliverable_id=event.deliverable_id,
                         base_price=1000.0,  # Default base price
@@ -79,8 +79,7 @@ class EnhancedDeliverableSagaOrchestrator:
                     logger.debug(f"Pricing may already exist for deliverable {event.deliverable_id}: {e}")
                 
                 # Recalculate project budget with the new deliverable
-                await self.pricing_service.recalculate_project_budget(
-                    session=session,
+                await pricing_service.recalculate_project_budget(
                     project_id=event.project_id
                 )
                 
@@ -93,9 +92,11 @@ class EnhancedDeliverableSagaOrchestrator:
         """Handle new task creation with intelligent sharing suggestions."""
         async with self.db_session_factory() as session:
             try:
+                # Create services with session
+                task_management_service = TaskManagementService(session)
+                
                 # Find similar tasks in the project
-                similar_tasks = await self.task_management_service.find_similar_tasks_in_project(
-                    session=session,
+                similar_tasks = await task_management_service.find_similar_tasks_in_project(
                     project_id=event.project_id,
                     task_title=event.task_title,
                     task_type=getattr(event, 'task_type', None),
@@ -104,8 +105,7 @@ class EnhancedDeliverableSagaOrchestrator:
                 
                 if similar_tasks:
                     # Log suggestion for task sharing
-                    sharing_suggestions = await self.task_management_service.suggest_task_sharing(
-                        session=session,
+                    sharing_suggestions = await task_management_service.suggest_task_sharing(
                         project_id=event.project_id,
                         new_task_title=event.task_title,
                         new_task_type=getattr(event, 'task_type', None)

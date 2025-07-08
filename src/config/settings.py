@@ -14,12 +14,17 @@ class Settings(BaseSettings):
 
     # Database settings
     DATABASE_URL: str = (
-        "postgresql+asyncpg://ConvrseConnect:ConvrseConnect123@localhost:5433/project_db"
+        "postgresql+asyncpg://ConvrseConnect:ConvrseConnect123@localhost:5432/project_db"
     )
+
+    # Redis settings
+    REDIS_URL: str = "redis://localhost:6379"
+    REDIS_PREFIX: str = "convrse:"
+    REDIS_CACHE_TTL: int = 300  # 5 minutes default TTL
 
     # Event Bus general settings
     # Options: "kafka", "sqs_mock", "sqs" (when implemented)
-    ACTIVE_EVENT_BUS: str = "kafka"  # <---- NEW SETTING!
+    ACTIVE_EVENT_BUS: str = "sqs_mock"  # <---- Changed to sqs_mock for development!
 
     # Kafka settings
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"

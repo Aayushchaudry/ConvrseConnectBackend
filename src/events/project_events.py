@@ -6,17 +6,7 @@ from datetime import datetime  # <-- Ensure this is imported
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-
-# --- Base Event Definition (Optional but good practice) ---
-@dataclass
-class BaseEvent:
-    event_id: UUID  # Unique ID for this specific event instance
-    timestamp: datetime  # When the event occurred
-    event_type: str  # A string identifier for the type of event
-
-    def __post_init__(self):
-        if not hasattr(self, "event_type") or self.event_type is None:
-            self.event_type = self.__class__.__name__
+from src.events.base_event import BaseEvent
 
 
 # --- Project-Level Events ---
@@ -33,12 +23,18 @@ class ProjectCreatedEvent(BaseEvent):
     project_id: UUID
     project_name: str
     initial_status: str  # e.g., "initiated" or "created"
+    deliverable_types: List[str]  # List of deliverable types for orchestrator to auto-create
+    deliverable_sub_types: Dict[str, str]  # Dictionary of deliverable subtypes for each deliverable type
+    deliverable_timeline_days: Dict[str, int]  # Dictionary of deliverable timeline days for each deliverable type
 
     def __init__(
         self,
         project_id: UUID,
         project_name: str,
         initial_status: str,
+        deliverable_types: List[str] = None,
+        deliverable_sub_types: Dict[str, str] = None,
+        deliverable_timeline_days: Dict[str, int] = None,
         event_id: UUID = None,
         timestamp: datetime = None,
         event_type: str = None,
@@ -66,6 +62,9 @@ class ProjectCreatedEvent(BaseEvent):
         self.project_id = project_id
         self.project_name = project_name
         self.initial_status = initial_status
+        self.deliverable_types = deliverable_types or []
+        self.deliverable_sub_types = deliverable_sub_types or {}
+        self.deliverable_timeline_days = deliverable_timeline_days or {}
 
 
 @dataclass

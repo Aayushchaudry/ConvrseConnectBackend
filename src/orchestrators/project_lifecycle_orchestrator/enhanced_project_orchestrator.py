@@ -34,11 +34,8 @@ class EnhancedProjectLifecycleOrchestrator:
     def __init__(self, db_session_factory: Callable[[], AsyncSession]):
         self.db_session_factory = db_session_factory
         
-        # Initialize Phase 2 Services
-        self.requirement_service = RequirementService()
-        self.pricing_service = PricingService()
-        self.timeline_service = TimelineTrackingService()
-        self.task_management_service = TaskManagementService()
+        # Don't initialize services here since they require db_session
+        # Services will be created in individual methods when needed
 
     async def on_project_created_enhanced(self, event: ProjectCreatedEvent):
         """Auto-generate requirements, timeline, and budget on project creation."""
@@ -46,6 +43,11 @@ class EnhancedProjectLifecycleOrchestrator:
         
         async with self.db_session_factory() as session:
             try:
+                # Initialize services with session
+                requirement_service = RequirementService(session)
+                pricing_service = PricingService(session)
+                timeline_service = TimelineTrackingService(session)
+                
                 # Get project deliverables
                 deliverables_result = await session.execute(
                     select(Deliverable).filter(Deliverable.project_id == event.project_id)
@@ -54,32 +56,47 @@ class EnhancedProjectLifecycleOrchestrator:
                 
                 # Auto-generate requirements for each deliverable
                 for deliverable in deliverables:
-                    await self.requirement_service.auto_generate_requirements(
-                        session=session,
+                    await requirement_service.auto_generate_requirements(
                         project_id=event.project_id,
                         deliverable_id=deliverable.id,
                         deliverable_type=deliverable.deliverable_type or "standard"
                     )
                 
                 # Auto-generate project-level requirements
-                await self.requirement_service.auto_generate_requirements(
-                    session=session,
+                await requirement_service.auto_generate_requirements(
                     project_id=event.project_id,
                     deliverable_id=None,
                     deliverable_type="project"
                 )
                 
                 # Initialize project budget
-                budget_result = await self.pricing_service.calculate_project_budget(
-                    session=session,
+                budget_result = await pricing_service.calculate_project_budget(
                     project_id=event.project_id
                 )
                 
                 # Create project milestones
-                milestones = await self.timeline_service.create_project_milestones(
-                    session=session,
-                    project_id=event.project_id
+                # Extract the maximum tentative days from deliverable timeline days for development phase
+                max_tentative_days = None
+                if hasattr(event, 'deliverable_timeline_days') and event.deliverable_timeline_days:
+                    max_tentative_days = max(event.deliverable_timeline_days.values()) if event.deliverable_timeline_days else None
+                
+                # Determine delivery type from sub_types - use the most common one
+                delivery_type = "exterior"  # Default
+                if hasattr(event, 'deliverable_sub_types') and event.deliverable_sub_types:
+                    sub_types = list(event.deliverable_sub_types.values())
+                    interior_count = sum(1 for st in sub_types if st.lower() == 'interior')
+                    exterior_count = sum(1 for st in sub_types if st.lower() == 'exterior')
+                    if interior_count > exterior_count:
+                        delivery_type = "interior"
+                
+                # Logging before timeline creation
+                logger.info(f"About to create timeline milestones for project {event.project_id} with delivery_type={delivery_type} and tentative_days={max_tentative_days}")
+                milestones = await timeline_service.create_project_milestones(
+                    project_id=event.project_id,
+                    delivery_type=delivery_type,  # Use determined delivery type from sub_types
+                    deliverable_tentative_days=max_tentative_days,  # Use the maximum tentative days for development phase
                 )
+                logger.info(f"Created {len(milestones)} timeline milestones for project {event.project_id}")
                 
                 logger.info(f"Auto-generation completed for project {event.project_id}")
                 
@@ -90,8 +107,8 @@ class EnhancedProjectLifecycleOrchestrator:
         """Enhanced task completion with timeline tracking."""
         async with self.db_session_factory() as session:
             try:
-                await self.timeline_service.log_daily_progress(
-                    session=session,
+                timeline_service = TimelineTrackingService(session)
+                await timeline_service.log_daily_progress(
                     task_id=event.task_id,
                     progress_date=datetime.now().date(),
                     percentage_complete=100,
@@ -110,9 +127,9 @@ class EnhancedProjectLifecycleOrchestrator:
         if event.new_status.lower() in ['in-progress', 'in_progress']:
             async with self.db_session_factory() as session:
                 try:
+                    timeline_service = TimelineTrackingService(session)
                     # Log task start progress
-                    await self.timeline_service.log_daily_progress(
-                        session=session,
+                    await timeline_service.log_daily_progress(
                         task_id=event.task_id,
                         progress_date=datetime.now().date(),
                         percentage_complete=10,  # Initial progress when started
@@ -131,9 +148,10 @@ class EnhancedProjectLifecycleOrchestrator:
         if event.new_status.lower() in ['received', 'approved']:
             async with self.db_session_factory() as session:
                 try:
+                    # Create pricing service with session
+                    pricing_service = PricingService(session)
                     # Recalculate project budget as requirements may affect scope
-                    await self.pricing_service.recalculate_project_budget(
-                        session=session,
+                    await pricing_service.recalculate_project_budget(
                         project_id=event.project_id
                     )
                     
@@ -146,17 +164,17 @@ class EnhancedProjectLifecycleOrchestrator:
         """Enhanced handler for deliverable completion with budget and timeline updates."""
         async with self.db_session_factory() as session:
             try:
+                # Create services with session
+                pricing_service = PricingService(session)
+                timeline_service = TimelineTrackingService(session)
+                
                 # Update budget tracking
-                await self.pricing_service.recalculate_project_budget(
-                    session=session,
+                await pricing_service.recalculate_project_budget(
                     project_id=event.project_id
                 )
                 
                 # Update timeline completion
-                await self.timeline_service.calculate_project_completion(
-                    session=session,
-                    project_id=event.project_id
-                )
+                await timeline_service.calculate_project_completion(event.project_id)
                 
                 logger.info(f"Updated budget and timeline for completed deliverable {event.deliverable_id}")
                 

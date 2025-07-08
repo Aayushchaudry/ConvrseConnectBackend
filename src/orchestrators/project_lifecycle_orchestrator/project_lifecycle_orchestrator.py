@@ -47,6 +47,7 @@ class ProjectLifecycleOrchestrator:
     def __init__(
         self, db_session_factory: Callable[[], AsyncSession], event_bus: EventBus
     ):
+        logger.info("🚨 [ORCHESTRATOR] ProjectLifecycleOrchestrator __init__ called - orchestrator is being instantiated.")
         """
         Initializes the ProjectLifecycleOrchestrator.
         Args:
@@ -77,9 +78,14 @@ class ProjectLifecycleOrchestrator:
         """
         Handles the ProjectCreatedEvent to initiate the Project Lifecycle SAGA.
         This is the entry point for the Project SAGA orchestration.
+        Backend orchestration: Auto-creates deliverables from deliverable_types.
         """
+        logger.info(f"🚦 Orchestrator: Received ProjectCreatedEvent: {event}")
         logger.info(
-            f"ProjectLifecycleOrchestrator: Received ProjectCreatedEvent for Project ID: {event.project_id}"
+            f"🔄 ProjectLifecycleOrchestrator: Received ProjectCreatedEvent for Project ID: {event.project_id}"
+        )
+        logger.info(
+            f"🔄 ProjectLifecycleOrchestrator: Auto-creating {len(event.deliverable_types)} deliverable types: {event.deliverable_types}"
         )
 
         async with self.db_session_factory() as session:
@@ -104,13 +110,137 @@ class ProjectLifecycleOrchestrator:
                 )
                 return
 
+            # 1. AUTO-CREATE DELIVERABLES from deliverable_types (Backend Orchestration)
+            created_deliverable_ids = []
+            if event.deliverable_types:
+                logger.info(f"🔄 ProjectLifecycleOrchestrator: Creating deliverables for project {event.project_id}")
+                
+                # Import deliverable service and models here to avoid circular imports
+                from src.services.deliverable_service import DeliverableService
+                from src.models.deliverable import DeliverableType
+                from src.models.project import Project
+                from src.config.event_bus import get_event_bus
+                from sqlalchemy import select
+                
+                # Fetch the project to get the created_by field
+                project_result = await session.execute(
+                    select(Project).filter(Project.id == event.project_id)
+                )
+                project = project_result.scalar_one_or_none()
+                
+                if not project:
+                    logger.error(f"❌ ProjectLifecycleOrchestrator: Project {event.project_id} not found")
+                    return
+                
+                project_created_by = project.created_by
+                logger.info(f"🔄 ProjectLifecycleOrchestrator: Using created_by={project_created_by} from project for deliverables")
+                
+                # Create deliverable service instance
+                event_bus_instance = await get_event_bus()
+                deliverable_service = DeliverableService(db_session=session, event_bus=event_bus_instance)
+                
+                for deliverable_type_str in event.deliverable_types:
+                    try:
+                        # Convert string to enum
+                        deliverable_type_enum = DeliverableType(deliverable_type_str)
+                        
+                        logger.info(f"🔄 ProjectLifecycleOrchestrator: Creating deliverable of type: {deliverable_type_str}")
+                        
+                        # Use custom timeline days if provided, otherwise use defaults
+                        custom_timeline_days = event.deliverable_timeline_days.get(deliverable_type_str)
+                        
+                        if custom_timeline_days:
+                            timeline_days = custom_timeline_days
+                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using custom timeline days: {timeline_days} for {deliverable_type_str}")
+                        else:
+                            # Set reasonable defaults for timeline based on deliverable type
+                            if deliverable_type_enum == DeliverableType.RENDERED_IMAGES:
+                                timeline_days = 14
+                            elif deliverable_type_enum == DeliverableType.TECHNICAL_RENDERS:
+                                timeline_days = 10
+                            elif deliverable_type_enum == DeliverableType.EXTERIOR_VR_TOUR:
+                                timeline_days = 21
+                            elif deliverable_type_enum == DeliverableType.ANIMATED_VR_TOUR:
+                                timeline_days = 28
+                            elif deliverable_type_enum == DeliverableType.VIDEO_WALKTHROUGH:
+                                timeline_days = 21
+                            elif deliverable_type_enum == DeliverableType.INVENTORY_MODULE:
+                                timeline_days = 14
+                            elif deliverable_type_enum == DeliverableType.LOCATION_MAP:
+                                timeline_days = 7
+                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_SALES_APP:
+                                timeline_days = 35
+                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_DRONE_SHOOT:
+                                timeline_days = 21
+                            elif deliverable_type_enum == DeliverableType.INTERPLAYER_SOFTWARE:
+                                timeline_days = 28
+                            else:
+                                timeline_days = 30  # Default fallback
+                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using default timeline days: {timeline_days} for {deliverable_type_str}")
+                        
+                        # Get sub_type from event or use defaults
+                        custom_sub_type = event.deliverable_sub_types.get(deliverable_type_str)
+                        
+                        if custom_sub_type:
+                            deliverable_sub_type = custom_sub_type.title()  # Capitalize first letter
+                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using custom sub type: {deliverable_sub_type} for {deliverable_type_str}")
+                        else:
+                            # Set reasonable defaults for sub_type based on deliverable type
+                            if deliverable_type_enum == DeliverableType.RENDERED_IMAGES:
+                                deliverable_sub_type = "Interior & Exterior Views"
+                            elif deliverable_type_enum == DeliverableType.TECHNICAL_RENDERS:
+                                deliverable_sub_type = "Technical Visualization"
+                            elif deliverable_type_enum == DeliverableType.EXTERIOR_VR_TOUR:
+                                deliverable_sub_type = "Exterior Virtual Tour"
+                            elif deliverable_type_enum == DeliverableType.ANIMATED_VR_TOUR:
+                                deliverable_sub_type = "Animated Virtual Tour"
+                            elif deliverable_type_enum == DeliverableType.VIDEO_WALKTHROUGH:
+                                deliverable_sub_type = "Video Walkthrough"
+                            elif deliverable_type_enum == DeliverableType.INVENTORY_MODULE:
+                                deliverable_sub_type = "Inventory Management"
+                            elif deliverable_type_enum == DeliverableType.LOCATION_MAP:
+                                deliverable_sub_type = "Location Mapping"
+                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_SALES_APP:
+                                deliverable_sub_type = "Interactive Sales Application"
+                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_DRONE_SHOOT:
+                                deliverable_sub_type = "Drone Photography & Integration"
+                            elif deliverable_type_enum == DeliverableType.INTERPLAYER_SOFTWARE:
+                                deliverable_sub_type = "Interplayer AV Room Setup"
+                            else:
+                                deliverable_sub_type = "Standard"  # Default fallback
+                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using default sub type: {deliverable_sub_type} for {deliverable_type_str}")
+                        
+                        # Create deliverable using the service with project's created_by and custom timeline
+                        created_deliverable = await deliverable_service.create_deliverable(
+                            project_id=event.project_id,
+                            deliverable_type=deliverable_type_enum,
+                            deliverable_sub_type=deliverable_sub_type,  # Use custom or default sub type
+                            tentative_timeline_days=timeline_days,  # Use custom or default timeline
+                            created_by=project_created_by,  # ✅ Use project's created_by instead of None
+                            assigned_to=None,  # Will be assigned later
+                        )
+                        
+                        created_deliverable_ids.append(created_deliverable.id)
+                        logger.info(f"✅ ProjectLifecycleOrchestrator: Created deliverable {created_deliverable.id} of type {deliverable_type_str}")
+                        
+                    except ValueError as e:
+                        logger.error(f"❌ ProjectLifecycleOrchestrator: Invalid deliverable type '{deliverable_type_str}': {e}")
+                        continue
+                    except Exception as e:
+                        logger.error(f"❌ ProjectLifecycleOrchestrator: Failed to create deliverable '{deliverable_type_str}': {e}")
+                        continue
+
+                logger.info(f"✅ ProjectLifecycleOrchestrator: Created {len(created_deliverable_ids)} deliverables for project {event.project_id}")
+            else:
+                logger.info(f"⚠️ ProjectLifecycleOrchestrator: No deliverable types specified for project {event.project_id}")
+
             # 2. Transition SAGA State and Send Next Command
             next_state = ProjectSagaState.INFO_GATHERING_INITIATED
 
             # This command (StartInformationGatheringCommand) will be consumed by the Information Gathering Service
             command = StartInformationGatheringCommand(
                 project_id=event.project_id,
-                deliverable_ids=[],  # Placeholder, will be populated once deliverables are in DB
+                deliverable_ids=created_deliverable_ids,  # Now populated with actual deliverable IDs
             )
 
             await self.saga_processor.publish_message(
@@ -127,7 +257,7 @@ class ProjectLifecycleOrchestrator:
                 command_id=command.command_id,
             )
             logger.info(
-                f"Project SAGA for {event.project_id} transitioned to {next_state.value} and sent StartInformationGatheringCommand."
+                f"✅ ProjectLifecycleOrchestrator: Project SAGA for {event.project_id} transitioned to {next_state.value} and sent StartInformationGatheringCommand with {len(created_deliverable_ids)} deliverables."
             )
 
     async def on_deliverable_delivered(self, event: DeliverableDeliveredEvent):
