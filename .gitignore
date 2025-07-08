@@ -237,3 +237,8 @@ docs/_build/
 data/local/
 local_data/
 test_data/local/
+
+# Additional specific files
+temp_enum.txt
+*_backup.py
+test_task_completion_event_fix.py
