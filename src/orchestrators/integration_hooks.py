@@ -43,7 +43,8 @@ class Phase4IntegrationHooks:
         
         # Initialize enhanced orchestrators
         self.enhanced_project_orchestrator = EnhancedProjectLifecycleOrchestrator(
-            db_session_factory=db_session_factory
+            db_session_factory=db_session_factory,
+            event_bus=event_bus
         )
         self.enhanced_deliverable_orchestrator = EnhancedDeliverableSagaOrchestrator(
             db_session_factory=db_session_factory
@@ -72,19 +73,19 @@ class Phase4IntegrationHooks:
             self._handle_deliverable_delivered
         )
         
-        # Task events
+        # Task events - Fixed topic names to match actual publishing
         self.event_bus.subscribe(
-            "task.created",
+            "internal_task.created",
             self._handle_task_created
         )
         
         self.event_bus.subscribe(
-            "task.completed",
+            "internal_task.completed",
             self._handle_task_completed
         )
         
         self.event_bus.subscribe(
-            "task.status_updated",
+            "internal_task.status_updated",
             self._handle_task_status_updated
         )
         

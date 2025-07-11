@@ -21,6 +21,7 @@ DELIVERABLE_EVENTS_TOPICS = [
     "deliverable.info_gathering.failed",  # From Information Gathering Service
     "internal_task.completed",  # From Production Management Service
     "internal_task.failed",  # From Production Management Service
+    "internal_task.created",  # From Production Management Service - Fixed topic name
     # Add other topics as they are defined and consumed by DeliverableSagaOrchestrator
     # "deliverable.delivered.final" # Final event from Delivery Service
 ]

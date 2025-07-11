@@ -14,6 +14,7 @@ from src.models.internal_task import InternalTask, TaskStatus
 from src.models.project import Project
 from src.models.task_progress import TaskProgress
 from src.models.project_timeline import ProjectTimeline
+from src.models.deliverable import Deliverable
 
 logger = logging.getLogger(__name__)
 
@@ -265,134 +266,146 @@ class TimelineTrackingService:
 
     def _determine_delivery_type(self, deliverable_types: List[str]) -> str:
         """
-        Determine delivery type (exterior/interior) based on deliverable types.
-        
-        Args:
-            deliverable_types: List of deliverable types from the project
-            
-        Returns:
-            str: "exterior" or "interior"
+        Determine if project is interior or exterior based on deliverable types.
+        For now using a simple heuristic - if any exterior type exists, treat as exterior.
         """
-        # Convert to lowercase for comparison
-        types_lower = [dt.lower() for dt in deliverable_types]
-        
-        # Interior indicators
-        interior_keywords = [
-            'interior', 'indoor', 'inside', 'room', 'apartment', 'house_interior',
-            'kitchen', 'bedroom', 'living_room', 'bathroom', 'office_interior'
-        ]
-        
-        # Check if any deliverable type indicates interior
-        for deliverable_type in types_lower:
-            if any(keyword in deliverable_type for keyword in interior_keywords):
-                return "interior"
-        
-        # Default to exterior if no interior indicators found
-        return "exterior"
+        exterior_types = {"exterior_vr_tour", "location_map", "interactive_drone_shoot"}
+        return "exterior" if any(d_type in exterior_types for d_type in deliverable_types) else "interior"
 
     async def create_project_milestones(
-        self,
-        project_id: UUID,
-        delivery_type: Optional[str] = None,  # Optional - will be determined from deliverables if not provided
-        deliverable_tentative_days: Optional[int] = None,  # From frontend deliverable timeline
-        deliverable_types: Optional[List[str]] = None,  # Used to determine delivery type if not provided
-        milestone_config: Optional[Dict[str, Any]] = None,
-    ) -> List[ProjectTimeline]:
-        """
-        Create delivery-type specific project milestones.
-        
-        Args:
-            project_id: ID of the project
-            delivery_type: "exterior" or "interior" to determine phase structure (optional)
-            deliverable_tentative_days: Tentative days for development phase from frontend
-            deliverable_types: List of deliverable types to determine delivery type
-            milestone_config: Optional custom milestone configuration
+            self,
+            project_id: UUID,
+            delivery_type: Optional[str] = None,  # Optional - will be determined from deliverables if not provided
+            deliverable_tentative_days: Optional[int] = None,  # From frontend deliverable timeline
+            deliverable_types: Optional[List[str]] = None,  # Used to determine delivery type if not provided
+            milestone_config: Optional[Dict[str, Any]] = None,
+        ) -> List[ProjectTimeline]:
+            """
+            Create delivery-type specific project milestones.
             
-        Returns:
-            List[ProjectTimeline]: Created milestone entries
-        """
-        logger.info(f"[TimelineTrackingService] create_project_milestones called for project_id={project_id}, delivery_type={delivery_type}, deliverable_tentative_days={deliverable_tentative_days}, deliverable_types={deliverable_types}")
+            Args:
+                project_id: ID of the project
+                delivery_type: "exterior" or "interior" to determine phase structure
+                deliverable_tentative_days: Maximum tentative days from all deliverables of this type
+                deliverable_types: List of deliverable types
+                milestone_config: Optional custom milestone configuration
+                
+            Returns:
+                List[ProjectTimeline]: Created milestone entries
+            """
+            logger.info(f"[TimelineTrackingService] create_project_milestones called for project_id={project_id}, delivery_type={delivery_type}")
 
-        # Determine delivery type if not provided
-        if not delivery_type and deliverable_types:
-            delivery_type = self._determine_delivery_type(deliverable_types)
-        elif not delivery_type:
-            delivery_type = "exterior"  # Default fallback
-        
-        logger.info(f"Creating {delivery_type} timeline milestones for project {project_id}")
-
-        # Get project to determine dates
-        project = await self._get_project_by_id(project_id)
-        if not project:
-            raise ValueError(f"Project with ID {project_id} not found")
-
-        # Define milestone configurations for each delivery type
-        if delivery_type.lower() == "exterior":
-            default_milestones = [
-                {"phase_name": "Modelling", "fixed_days": 7, "phase_order": 1, "duration_percentage": 15},
-                {"phase_name": "Texturing", "fixed_days": 8, "phase_order": 2, "duration_percentage": 15},
-                {"phase_name": "Lighting", "fixed_days": 3, "phase_order": 3, "duration_percentage": 15},
-                {"phase_name": "Development Phase", "use_deliverable_days": True, "phase_order": 4, "duration_percentage": 35},
-                {"phase_name": "Testing & QA", "fixed_days": 2, "phase_order": 5, "duration_percentage": 15},
-                {"phase_name": "Project Delivery", "fixed_days": 1, "phase_order": 6, "duration_percentage": 5, "is_milestone": True},
-            ]
-        elif delivery_type.lower() == "interior":
-            default_milestones = [
-                {"phase_name": "Theme Approval", "fixed_days": 3, "phase_order": 1, "duration_percentage": 5},
-                {"phase_name": "Modelling", "fixed_days": 7, "phase_order": 2, "duration_percentage": 15},
-                {"phase_name": "Texturing", "fixed_days": 8, "phase_order": 3, "duration_percentage": 15},
-                {"phase_name": "Lighting", "fixed_days": 3, "phase_order": 4, "duration_percentage": 15},
-                {"phase_name": "Development Phase", "use_deliverable_days": True, "phase_order": 5, "duration_percentage": 35},
-                {"phase_name": "Testing & QA", "fixed_days": 2, "phase_order": 6, "duration_percentage": 10},
-                {"phase_name": "Project Delivery", "fixed_days": 1, "phase_order": 7, "duration_percentage": 5, "is_milestone": True},
-            ]
-        else:
-            raise ValueError(f"Invalid delivery_type: {delivery_type}. Must be 'exterior' or 'interior'")
-
-        milestones = milestone_config.get("milestones", default_milestones) if milestone_config else default_milestones
-
-        # Calculate phase dates based on project timeline
-        start_date = project.start_date or datetime.now().date()
-        
-        created_milestones = []
-        current_start = start_date
-
-        for milestone in milestones:
-            # Determine phase duration
-            if milestone.get("use_deliverable_days") and deliverable_tentative_days:
-                # Use deliverable tentative days for development phase
-                phase_days = deliverable_tentative_days
-            elif milestone.get("fixed_days"):
-                # Use fixed days for specific phases
-                phase_days = milestone["fixed_days"]
-            else:
-                # Fallback to percentage-based calculation (shouldn't happen with current config)
-                end_date = project.end_date or (start_date + timedelta(days=90))
-                total_days = (end_date - start_date).days
-                phase_days = int(total_days * milestone["duration_percentage"] / 100)
+            # Determine delivery type if not provided
+            if not delivery_type and deliverable_types:
+                delivery_type = self._determine_delivery_type(deliverable_types)
+            elif not delivery_type:
+                delivery_type = "exterior"  # Default fallback
             
-            phase_end = current_start + timedelta(days=phase_days - 1)  # -1 because start day counts
+            logger.info(f"Creating {delivery_type} timeline milestones for project {project_id}")
 
-            timeline_entry = ProjectTimeline(
-                project_id=project_id,
-                phase_name=milestone["phase_name"],
-                planned_start_date=current_start,
-                planned_end_date=phase_end,
-                is_milestone=milestone.get("is_milestone", False),
-                phase_order=milestone["phase_order"],
-                percentage_complete=Decimal('0.00'),
-            )
+            # Get project to determine dates
+            project = await self._get_project_by_id(project_id)
+            if not project:
+                raise ValueError(f"Project with ID {project_id} not found")
 
-            self.db_session.add(timeline_entry)
-            created_milestones.append(timeline_entry)
-            current_start = phase_end + timedelta(days=1)  # Next phase starts next day
+            # Define milestone configurations based on delivery type
+            if delivery_type.lower() == "exterior":
+                default_milestones = [
+                    {
+                        "phase_name": "Kick-off Meeting",
+                        "fixed_days": 1,
+                        "phase_order": 1,
+                        "description": "Project initiation and requirements gathering"
+                    },
+                    {
+                        "phase_name": "Modeling",
+                        "fixed_days": 7,
+                        "phase_order": 2,
+                        "description": "3D modeling of exterior structures"
+                    },
+                    {
+                        "phase_name": "Texturing & Landscaping",
+                        "fixed_days": 8,
+                        "phase_order": 3,
+                        "description": "Applying textures and landscaping elements"
+                    },
+                    {
+                        "phase_name": "Lighting",
+                        "fixed_days": 3,
+                        "phase_order": 4,
+                        "description": "Setting up exterior lighting and ambiance"
+                    },
+                    {
+                        "phase_name": "Deliverables Completion",
+                        "fixed_days": deliverable_tentative_days or 7,  # Default to 7 if not provided
+                        "phase_order": 5,
+                        "description": "Final touches and deliverable preparation"
+                    }
+                ]
+            else:  # interior timeline
+                default_milestones = [
+                    {
+                        "phase_name": "Kick-off Meeting",
+                        "fixed_days": 1,
+                        "phase_order": 1,
+                        "description": "Project initiation and requirements gathering"
+                    },
+                    {
+                        "phase_name": "Theme Approval",
+                        "fixed_days": 3,
+                        "phase_order": 2,
+                        "description": "Interior theme and style approval"
+                    },
+                    {
+                        "phase_name": "Modeling & Texturing",
+                        "fixed_days": 7,
+                        "phase_order": 3,
+                        "description": "3D modeling and texture application"
+                    },
+                    {
+                        "phase_name": "Lighting",
+                        "fixed_days": 3,
+                        "phase_order": 4,
+                        "description": "Interior lighting setup"
+                    },
+                    {
+                        "phase_name": "Deliverables Completion",
+                        "fixed_days": deliverable_tentative_days or 7,  # Default to 7 if not provided
+                        "phase_order": 5,
+                        "description": "Final touches and deliverable preparation"
+                    }
+                ]
 
-        await self.db_session.commit()
-        for milestone in created_milestones:
-            await self.db_session.refresh(milestone)
-
-        logger.info(f"Created {len(created_milestones)} {delivery_type} milestones for project {project_id}")
-        return created_milestones
+            # Use custom milestone config if provided
+            milestones_to_create = milestone_config or default_milestones
+            
+            # Calculate dates and create timeline entries
+            current_date = datetime.now()
+            created_milestones = []
+            
+            for milestone in milestones_to_create:
+                end_date = current_date + timedelta(days=milestone["fixed_days"])
+                
+                timeline_entry = ProjectTimeline(
+                    project_id=project_id,
+                    phase_name=milestone["phase_name"],
+                    description=milestone["description"],
+                    phase_order=milestone["phase_order"],
+                    planned_start_date=current_date,
+                    planned_end_date=end_date,
+                    status="not_started"
+                )
+                
+                self.db_session.add(timeline_entry)
+                created_milestones.append(timeline_entry)
+                
+                # Update current_date for next milestone
+                current_date = end_date
+            
+            await self.db_session.commit()
+            
+            logger.info(f"Created {len(created_milestones)} timeline milestones for project {project_id}")
+            return created_milestones
 
     async def update_milestone_status(
         self,

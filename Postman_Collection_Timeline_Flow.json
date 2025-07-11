@@ -1,0 +1,260 @@
+{
+	"info": {
+		"_postman_id": "timeline-flow-collection",
+		"name": "ConvrseConnect - Project Timeline Flow",
+		"description": "Complete API collection to test project creation, deliverable creation, and timeline orchestration flow",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost",
+			"type": "string"
+		},
+		{
+			"key": "project_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "deliverable_id_1",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "deliverable_id_2",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/connect/health",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "health"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "2. Create Project with Deliverables",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"if (pm.response.code === 201) {",
+							"    const responseJson = pm.response.json();",
+							"    pm.collectionVariables.set('project_id', responseJson.id);",
+							"    console.log('Project created with ID:', responseJson.id);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"name\": \"Test Project - Mixed Interior/Exterior\",\n  \"budget\": 25000,\n  \"start_date\": \"2024-01-01\",\n  \"end_date\": \"2024-06-01\",\n  \"business_id\": \"biz_convrse_default\",\n  \"created_by\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"deliverable_types\": [\"rendered_images\", \"vr_tour\", \"technical_renders\"],\n  \"deliverable_sub_types\": {\n    \"rendered_images\": \"exterior\",\n    \"vr_tour\": \"interior\",\n    \"technical_renders\": \"exterior\"\n  },\n  \"deliverable_timeline_days\": {\n    \"rendered_images\": 14,\n    \"vr_tour\": 21,\n    \"technical_renders\": 10\n  }\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/projects/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "projects", ""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "3. Get Project Details",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/projects/{{project_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "projects", "{{project_id}}"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "4. Get Project Deliverables",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"if (pm.response.code === 200) {",
+							"    const deliverables = pm.response.json();",
+							"    if (deliverables.length > 0) {",
+							"        pm.collectionVariables.set('deliverable_id_1', deliverables[0].id);",
+							"        console.log('First deliverable ID:', deliverables[0].id);",
+							"    }",
+							"    if (deliverables.length > 1) {",
+							"        pm.collectionVariables.set('deliverable_id_2', deliverables[1].id);",
+							"        console.log('Second deliverable ID:', deliverables[1].id);",
+							"    }",
+							"    console.log('Total deliverables found:', deliverables.length);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/projects/{{project_id}}/deliverables/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "projects", "{{project_id}}", "deliverables", ""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "5. Get Project Timeline",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/timeline/projects/{{project_id}}/timeline/comparison",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "timeline", "projects", "{{project_id}}", "timeline", "comparison"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "6. Get Project Tasks",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/projects/{{project_id}}/tasks",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "projects", "{{project_id}}", "tasks"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "7. Create Additional Deliverable (Manual)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"if (pm.response.code === 201) {",
+							"    const responseJson = pm.response.json();",
+							"    console.log('Additional deliverable created with ID:', responseJson.id);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"deliverable_type\": \"video_walkthrough\",\n  \"deliverable_sub_type\": \"interior\",\n  \"tentative_timeline_days\": 18\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/projects/{{project_id}}/deliverables/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "projects", "{{project_id}}", "deliverables", ""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "8. Update Deliverable Status",
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"current_status\": \"modeling_pending\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/deliverables/{{deliverable_id_1}}/status",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "deliverables", "{{deliverable_id_1}}", "status"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "9. Create Manual Task",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"project_id\": \"{{project_id}}\",\n  \"deliverable_id\": \"{{deliverable_id_1}}\",\n  \"task_name\": \"Manual Test Task\",\n  \"task_type\": \"modeling\",\n  \"description\": \"A manually created test task\",\n  \"status\": \"not_started\",\n  \"priority\": \"medium\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "internal-tasks", ""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "10. Get All Projects",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/projects/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "projects", ""]
+				}
+			},
+			"response": []
+		}
+	]
+} 

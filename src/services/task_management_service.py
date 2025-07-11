@@ -430,6 +430,69 @@ class TaskManagementService:
 
         return new_task, False, "created_deliverable_specific_task"
 
+    async def create_task(
+        self,
+        project_id: UUID,
+        task_type: str,
+        title: str,
+        description: Optional[str] = None,
+        duration_days: Optional[int] = None,
+        dependencies: Optional[List[UUID]] = None,
+        deliverable_id: Optional[UUID] = None,
+        created_by: Optional[UUID] = None,
+    ) -> UUID:
+        """
+        Create a new task with dependencies for timeline orchestration.
+        
+        Args:
+            project_id: The project this task belongs to
+            task_type: Type of task (modeling, texturing, lighting, etc.)
+            title: Task title
+            description: Task description
+            duration_days: Estimated duration in days
+            dependencies: List of task IDs this task depends on
+            deliverable_id: Specific deliverable this task relates to (optional)
+            created_by: User who created the task
+            
+        Returns:
+            UUID: The ID of the newly created task
+        """
+        logger.info(f"Creating task '{title}' of type '{task_type}' for project {project_id}")
+
+        # Validate project exists
+        project = await self._get_project_by_id(project_id)
+        if not project:
+            raise ValueError(f"Project with ID {project_id} not found")
+
+        # Convert duration to estimated hours (assuming 8 hours per day)
+        estimated_hours = Decimal(duration_days * 8) if duration_days else None
+
+        # Create the task
+        new_task = InternalTask(
+            project_id=project_id,
+            deliverable_id=deliverable_id,
+            task_name=title,
+            task_type=task_type,
+            description=description,
+            status=TaskStatus.NOT_STARTED,
+            priority="MEDIUM",
+            estimated_hours=estimated_hours,
+            actual_hours=Decimal('0.00'),
+            created_by=created_by,
+        )
+
+        self.db_session.add(new_task)
+        await self.db_session.commit()
+        await self.db_session.refresh(new_task)
+
+        logger.info(f"Created task with ID: {new_task.id}")
+
+        # TODO: Handle dependencies when task dependency model is available
+        if dependencies:
+            logger.info(f"Task dependencies will be handled: {dependencies}")
+
+        return new_task.id
+
     # Helper methods
 
     async def _get_project_by_id(self, project_id: UUID) -> Optional[Project]:

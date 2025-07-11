@@ -494,6 +494,29 @@ async def create_internal_task(
         await db_session.commit()
         await db_session.refresh(task)
 
+        # Publish task created event
+        try:
+            from src.events.task_events import InternalTaskCreatedEvent
+            
+            task_created_event = InternalTaskCreatedEvent(
+                project_id=task.project_id,
+                deliverable_id=task.deliverable_id,
+                task_id=task.id,
+                task_name=task.task_name,
+                task_type=task.task_type.value if hasattr(task.task_type, 'value') else str(task.task_type),
+            )
+            
+            await event_bus.publish(
+                topic="internal_task.created",
+                message=task_created_event.__dict__,
+            )
+            
+            logger.info(f"Published InternalTaskCreatedEvent for task {task.id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to publish task creation event: {e}")
+            # Don't fail the request if event publishing fails
+
         return task
 
     except Exception as e:

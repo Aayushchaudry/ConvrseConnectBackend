@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # Database settings
     DATABASE_URL: str = (
-        "postgresql+asyncpg://ConvrseConnect:ConvrseConnect123@localhost:5432/project_db"
+        "postgresql+asyncpg://convrseconnect:ConvrseConnect123@127.0.0.1:5432/project_db"
     )
 
     # Redis settings
