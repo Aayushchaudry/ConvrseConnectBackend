@@ -140,37 +140,61 @@ class ProductionManagementService:
                     )
                     return
 
-                # Create new project-level modeling task
-                new_task = InternalTask(
-                    project_id=command.project_id,
-                    deliverable_id=None,  # Project-level task
-                    task_name=f"Project Modeling - {project.name}",
-                    task_type=TaskType.MODELING.value,
-                    status=TaskStatus.TODO.value,
-                    priority=Priority.HIGH.value,
-                    start_date=datetime.utcnow(),
-                    is_project_level=True,  # Mark as project-level
-                    description=f"3D modeling work for all deliverables in project {project.name}",
-                )
-                session.add(new_task)
+                # Create four project-level tasks for each phase instead of a single modeling task
+                phase_definitions = [
+                    {
+                        "task_name": f"Phase 1 - Modeling - {project.name}",
+                        "task_type": TaskType.MODELING.value,
+                        "description": f"3D modeling work for all deliverables in project {project.name}",
+                    },
+                    {
+                        "task_name": f"Phase 2 - Texturing and Landscaping - {project.name}",
+                        "task_type": TaskType.TEXTURING.value,
+                        "description": f"Texturing and landscaping for all deliverables in project {project.name}",
+                    },
+                    {
+                        "task_name": f"Phase 3 - Lighting - {project.name}",
+                        "task_type": TaskType.LIGHTING.value,
+                        "description": f"Lighting work for all deliverables in project {project.name}",
+                    },
+                    {
+                        "task_name": f"Phase 4 - Final Deliverable - {project.name}",
+                        "task_type": TaskType.FINAL_DELIVERABLE.value if hasattr(TaskType, 'FINAL_DELIVERABLE') else TaskType.RENDERING.value,
+                        "description": f"Final deliverable phase for all deliverables in project {project.name}",
+                    },
+                ]
+                created_tasks = []
+                for phase in phase_definitions:
+                    task = InternalTask(
+                        project_id=command.project_id,
+                        deliverable_id=None,  # Project-level task
+                        task_name=phase["task_name"],
+                        task_type=phase["task_type"],
+                        status=TaskStatus.TODO.value,
+                        priority=Priority.HIGH.value,
+                        start_date=datetime.utcnow(),
+                        is_project_level=True,  # Mark as project-level
+                        description=phase["description"],
+                    )
+                    session.add(task)
+                    created_tasks.append(task)
                 await session.commit()
-                await session.refresh(new_task)
-
-                logger.info(
-                    f"✅ ProductionManagementService: Created new project-level modeling task: {new_task.id} for project {command.project_id}"
-                )
-
-                # Publish event that a new task was created
-                await self.event_bus.publish(
-                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
-                    message=InternalTaskCreatedEvent(
-                        project_id=new_task.project_id,
-                        deliverable_id=command.deliverable_id,  # Keep original deliverable_id for context
-                        task_id=new_task.id,
-                        task_name=new_task.task_name,
-                        task_type=new_task.task_type,
-                    ).__dict__,
-                )
+                for task in created_tasks:
+                    await session.refresh(task)
+                    logger.info(
+                        f"✅ ProductionManagementService: Created new project-level task: {task.id} for project {command.project_id} ({task.task_name})"
+                    )
+                    # Publish event that a new task was created
+                    await self.event_bus.publish(
+                        topic="internal_task.completed",  # Use existing topic that orchestrator listens to
+                        message=InternalTaskCreatedEvent(
+                            project_id=task.project_id,
+                            deliverable_id=command.deliverable_id,  # Keep original deliverable_id for context
+                            task_id=task.id,
+                            task_name=task.task_name,
+                            task_type=task.task_type,
+                        ).__dict__,
+                    )
             except ValueError as ve:
                 logger.error(f"ProductionManagementService Error: {ve}")
                 # Publish a failure event if project/deliverable not found
