@@ -78,7 +78,7 @@ class ProjectLifecycleOrchestrator:
         """
         Handles the ProjectCreatedEvent to initiate the Project Lifecycle SAGA.
         This is the entry point for the Project SAGA orchestration.
-        Backend orchestration: Auto-creates deliverables from deliverable_types.
+        Backend orchestration: Auto-creates deliverables from deliverable_types and creates timeline milestones.
         """
         logger.info(f"🚦 Orchestrator: Received ProjectCreatedEvent: {event}")
         logger.info(
@@ -112,46 +112,31 @@ class ProjectLifecycleOrchestrator:
 
             # 1. AUTO-CREATE DELIVERABLES from deliverable_types (Backend Orchestration)
             created_deliverable_ids = []
+            deliverable_type_to_days = {}
+            deliverable_type_to_subtype = {}
             if event.deliverable_types:
                 logger.info(f"🔄 ProjectLifecycleOrchestrator: Creating deliverables for project {event.project_id}")
-                
-                # Import deliverable service and models here to avoid circular imports
                 from src.services.deliverable_service import DeliverableService
                 from src.models.deliverable import DeliverableType
                 from src.models.project import Project
                 from src.config.event_bus import get_event_bus
                 from sqlalchemy import select
-                
-                # Fetch the project to get the created_by field
                 project_result = await session.execute(
                     select(Project).filter(Project.id == event.project_id)
                 )
                 project = project_result.scalar_one_or_none()
-                
                 if not project:
                     logger.error(f"❌ ProjectLifecycleOrchestrator: Project {event.project_id} not found")
                     return
-                
                 project_created_by = project.created_by
-                logger.info(f"🔄 ProjectLifecycleOrchestrator: Using created_by={project_created_by} from project for deliverables")
-                
-                # Create deliverable service instance
                 event_bus_instance = await get_event_bus()
                 deliverable_service = DeliverableService(db_session=session, event_bus=event_bus_instance)
-                
                 for deliverable_type_str in event.deliverable_types:
                     try:
-                        # Convert string to enum
                         deliverable_type_enum = DeliverableType(deliverable_type_str)
-                        
-                        logger.info(f"🔄 ProjectLifecycleOrchestrator: Creating deliverable of type: {deliverable_type_str}")
-                        
-                        # Use custom timeline days if provided, otherwise use defaults
                         custom_timeline_days = event.deliverable_timeline_days.get(deliverable_type_str)
-                        
                         if custom_timeline_days:
                             timeline_days = custom_timeline_days
-                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using custom timeline days: {timeline_days} for {deliverable_type_str}")
                         else:
                             # Set reasonable defaults for timeline based on deliverable type
                             if deliverable_type_enum == DeliverableType.RENDERED_IMAGES:
@@ -176,16 +161,10 @@ class ProjectLifecycleOrchestrator:
                                 timeline_days = 28
                             else:
                                 timeline_days = 30  # Default fallback
-                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using default timeline days: {timeline_days} for {deliverable_type_str}")
-                        
-                        # Get sub_type from event or use defaults
                         custom_sub_type = event.deliverable_sub_types.get(deliverable_type_str)
-                        
                         if custom_sub_type:
-                            deliverable_sub_type = custom_sub_type.title()  # Capitalize first letter
-                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using custom sub type: {deliverable_sub_type} for {deliverable_type_str}")
+                            deliverable_sub_type = custom_sub_type.title()
                         else:
-                            # Set reasonable defaults for sub_type based on deliverable type
                             if deliverable_type_enum == DeliverableType.RENDERED_IMAGES:
                                 deliverable_sub_type = "Interior & Exterior Views"
                             elif deliverable_type_enum == DeliverableType.TECHNICAL_RENDERS:
@@ -207,48 +186,94 @@ class ProjectLifecycleOrchestrator:
                             elif deliverable_type_enum == DeliverableType.INTERPLAYER_SOFTWARE:
                                 deliverable_sub_type = "Interplayer AV Room Setup"
                             else:
-                                deliverable_sub_type = "Standard"  # Default fallback
-                            logger.info(f"🔄 ProjectLifecycleOrchestrator: Using default sub type: {deliverable_sub_type} for {deliverable_type_str}")
-                        
-                        # Create deliverable using the service with project's created_by and custom timeline
+                                deliverable_sub_type = "Standard"
                         created_deliverable = await deliverable_service.create_deliverable(
                             project_id=event.project_id,
                             deliverable_type=deliverable_type_enum,
-                            deliverable_sub_type=deliverable_sub_type,  # Use custom or default sub type
-                            tentative_timeline_days=timeline_days,  # Use custom or default timeline
-                            created_by=project_created_by,  # ✅ Use project's created_by instead of None
-                            assigned_to=None,  # Will be assigned later
+                            deliverable_sub_type=deliverable_sub_type,
+                            tentative_timeline_days=timeline_days,
+                            created_by=project_created_by,
+                            assigned_to=None,
                         )
-                        
                         created_deliverable_ids.append(created_deliverable.id)
+                        deliverable_type_to_days[deliverable_type_str] = timeline_days
+                        deliverable_type_to_subtype[deliverable_type_str] = deliverable_sub_type
                         logger.info(f"✅ ProjectLifecycleOrchestrator: Created deliverable {created_deliverable.id} of type {deliverable_type_str}")
-                        
                     except ValueError as e:
                         logger.error(f"❌ ProjectLifecycleOrchestrator: Invalid deliverable type '{deliverable_type_str}': {e}")
                         continue
                     except Exception as e:
                         logger.error(f"❌ ProjectLifecycleOrchestrator: Failed to create deliverable '{deliverable_type_str}': {e}")
                         continue
-
                 logger.info(f"✅ ProjectLifecycleOrchestrator: Created {len(created_deliverable_ids)} deliverables for project {event.project_id}")
             else:
                 logger.info(f"⚠️ ProjectLifecycleOrchestrator: No deliverable types specified for project {event.project_id}")
 
-            # 2. Transition SAGA State and Send Next Command
-            next_state = ProjectSagaState.INFO_GATHERING_INITIATED
+            # 2. CREATE TIMELINE MILESTONES DIRECTLY HERE (PER GROUP, NOT PER DELIVERABLE)
+            from src.models.project_timeline import ProjectTimeline
+            from datetime import timedelta
+            from collections import defaultdict
 
-            # This command (StartInformationGatheringCommand) will be consumed by the Information Gathering Service
+            # Group deliverables by subtype
+            subtype_to_days = defaultdict(list)
+            for deliverable_type, timeline_days in deliverable_type_to_days.items():
+                sub_type = deliverable_type_to_subtype.get(deliverable_type, "Other")
+                subtype_to_days[sub_type].append(timeline_days)
+
+            timeline_entries = []
+            logger.info(f"🟢 Timeline creation: {len(subtype_to_days)} groups found: {list(subtype_to_days.keys())}")
+            for subtype, days_list in subtype_to_days.items():
+                max_days = max(days_list)
+                current_date = datetime.now().date()
+                if "exterior" in subtype.lower():
+                    logger.info(f"🟢 Using EXTERIOR timeline template for group '{subtype}'")
+                    milestones = [
+                        {"phase_name": "Kick-off Meeting", "fixed_days": 1, "phase_order": 1},
+                        {"phase_name": "Modeling", "fixed_days": 7, "phase_order": 2},
+                        {"phase_name": "Texturing and landscaping", "fixed_days": 8, "phase_order": 3},
+                        {"phase_name": "Lighting", "fixed_days": 3, "phase_order": 4},
+                        {"phase_name": "Final Deliverable", "fixed_days": max_days, "phase_order": 5},
+                    ]
+                elif "interior" in subtype.lower():
+                    logger.info(f"🟢 Using INTERIOR timeline template for group '{subtype}'")
+                    milestones = [
+                        {"phase_name": "Kick-off Meeting", "fixed_days": 1, "phase_order": 1},
+                        {"phase_name": "Theme Approval", "fixed_days": 3, "phase_order": 2},
+                        {"phase_name": "Modeling and Texturing and landscaping", "fixed_days": 8, "phase_order": 3},
+                        {"phase_name": "Final Deliverable", "fixed_days": max_days, "phase_order": 4},
+                    ]
+                else:
+                    logger.warning(f"⚠️ Skipping group '{subtype}' (no custom timeline template defined)")
+                    continue
+
+                for milestone in milestones:
+                    end_date = current_date + timedelta(days=milestone["fixed_days"])
+                    timeline_entry = ProjectTimeline(
+                        project_id=event.project_id,
+                        phase_name=milestone["phase_name"],
+                        phase_order=milestone["phase_order"],
+                        planned_start_date=current_date,
+                        planned_end_date=end_date,
+                        is_milestone=False,
+                        percentage_complete=0,
+                        dependencies={},
+                    )
+                    session.add(timeline_entry)
+                    timeline_entries.append(timeline_entry)
+                    current_date = end_date
+            await session.commit()
+            logger.info(f"🟢 Timeline creation: Created {len(timeline_entries)} timeline milestones for project {event.project_id}")
+
+            # 3. Transition SAGA State and Send Next Command
+            next_state = ProjectSagaState.INFO_GATHERING_INITIATED
             command = StartInformationGatheringCommand(
                 project_id=event.project_id,
-                deliverable_ids=created_deliverable_ids,  # Now populated with actual deliverable IDs
+                deliverable_ids=created_deliverable_ids,
             )
-
             await self.saga_processor.publish_message(
-                topic="project.command.start_info_gathering",  # Define this topic in your config/event_bus.py if needed
+                topic="project.command.start_info_gathering",
                 message_payload=command,
             )
-
-            # 3. Update SAGA state using SagaProcessor
             await self.saga_processor.update_saga_state(
                 session=session,
                 saga_state=saga_state,
