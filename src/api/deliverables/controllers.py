@@ -230,7 +230,7 @@ async def update_deliverable_status(
 
         # Update the status
         new_status = DeliverableStatus(status_data["current_status"])
-        deliverable.current_status = new_status
+        deliverable.current_status = new_status.value  # Use .value to store the string
 
         await db_session.commit()
         await db_session.refresh(deliverable)

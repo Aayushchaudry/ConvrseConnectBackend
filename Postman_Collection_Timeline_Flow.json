@@ -156,9 +156,9 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{base_url}}/api/connect/api/v1/projects/{{project_id}}/tasks",
+					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/projects/{{project_id}}/tasks",
 					"host": ["{{base_url}}"],
-					"path": ["api", "connect", "api", "v1", "projects", "{{project_id}}", "tasks"]
+					"path": ["api", "connect", "api", "v1", "internal-tasks", "projects", "{{project_id}}", "tasks"]
 				}
 			},
 			"response": []
@@ -233,12 +233,82 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"project_id\": \"{{project_id}}\",\n  \"deliverable_id\": \"{{deliverable_id_1}}\",\n  \"task_name\": \"Manual Test Task\",\n  \"task_type\": \"modeling\",\n  \"description\": \"A manually created test task\",\n  \"status\": \"not_started\",\n  \"priority\": \"medium\"\n}"
+					"raw": "{\n  \"project_id\": \"{{project_id}}\",\n  \"deliverable_id\": \"{{deliverable_id_1}}\",\n  \"task_name\": \"Manual Test Task\",\n  \"task_type\": \"MODELING\",\n  \"description\": \"A manually created test task\",\n  \"status\": \"TODO\",\n  \"priority\": \"NORMAL\"\n}"
 				},
 				"url": {
 					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/",
 					"host": ["{{base_url}}"],
 					"path": ["api", "connect", "api", "v1", "internal-tasks", ""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "11. Complete Internal Task",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/{{task_id}}/complete",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "internal-tasks", "{{task_id}}", "complete"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "12. Delete Project-Level Task",
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/projects/{{project_id}}/tasks/{{task_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "internal-tasks", "projects", "{{project_id}}", "tasks", "{{task_id}}"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "13. List All Internal Tasks",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "internal-tasks", ""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "14. Update Project-Level Task Status",
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"status\": \"done\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/projects/{{project_id}}/tasks/{{task_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "connect", "api", "v1", "internal-tasks", "projects", "{{project_id}}", "tasks", "{{task_id}}"]
 				}
 			},
 			"response": []

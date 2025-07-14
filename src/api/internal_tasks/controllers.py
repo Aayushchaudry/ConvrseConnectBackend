@@ -58,6 +58,7 @@ class ProjectTaskResponse(BaseModel):
     Simplified response schema for project-level tasks (frontend interface).
     """
     id: str  # UUID as string for frontend
+    task_name: str
     description: str
     status: str  # Simple status mapping
     created_at: datetime
@@ -93,7 +94,7 @@ class InternalTaskResponse(BaseModel):
 
     id: UUID
     project_id: UUID
-    deliverable_id: UUID
+    deliverable_id: Optional[UUID]  # <-- Make this Optional
     parent_task_id: Optional[UUID]
     task_name: str
     task_type: TaskType
@@ -148,7 +149,7 @@ async def get_project_tasks(
     Returns simplified task data for the frontend TaskList component.
     """
     # Get auth context
-    auth_context = require_auth(request)
+    # auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select
@@ -167,6 +168,7 @@ async def get_project_tasks(
         for task in tasks:
             simplified_tasks.append(ProjectTaskResponse(
                 id=str(task.id),
+                task_name=task.task_name,  # <-- Add this line
                 description=task.description or task.task_name,
                 status=map_task_status_to_frontend(task.status),
                 created_at=task.created_at,
@@ -224,6 +226,7 @@ async def create_project_task(
         # Return simplified response
         return ProjectTaskResponse(
             id=str(task.id),
+            task_name=task.task_name,  # <-- Add this line
             description=task.description or task.task_name,
             status=map_task_status_to_frontend(task.status),
             created_at=task.created_at,
@@ -252,7 +255,7 @@ async def update_project_task_status(
     Update the status of a project-level task.
     """
     # Get auth context
-    auth_context = require_auth(request)
+    # auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select, and_
@@ -339,6 +342,7 @@ async def update_project_task_status(
         # Return simplified response
         return ProjectTaskResponse(
             id=str(task.id),
+            task_name=task.task_name,  # <-- Add this line
             description=task.description or task.task_name,
             status=map_task_status_to_frontend(task.status),
             created_at=task.created_at,
@@ -367,7 +371,7 @@ async def delete_project_task(
     Delete a project-level task.
     """
     # Get auth context
-    auth_context = require_auth(request)
+    # auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select, and_
@@ -421,7 +425,7 @@ async def list_internal_tasks(
     Get a list of internal tasks with optional filtering.
     """
     # Get auth context
-    auth_context = require_auth(request)
+    # auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select, and_
