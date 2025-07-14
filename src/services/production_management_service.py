@@ -195,6 +195,10 @@ class ProductionManagementService:
                             task_type=task.task_type,
                         ).__dict__,
                     )
+                # Add sequential dependencies: each phase depends on the previous
+                for i in range(1, len(created_tasks)):
+                    created_tasks[i].parent_task_id = created_tasks[i-1].id
+                await session.commit()
             except ValueError as ve:
                 logger.error(f"ProductionManagementService Error: {ve}")
                 # Publish a failure event if project/deliverable not found
