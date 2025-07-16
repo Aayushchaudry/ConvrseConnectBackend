@@ -34,6 +34,43 @@
 	],
 	"item": [
 		{
+			"name": "0. Auth Login",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"if (pm.response.code === 200) {",
+							"    const responseJson = pm.response.json();",
+							"    pm.collectionVariables.set('auth_token', responseJson.access_token);",
+							"    console.log('Auth token set:', responseJson.tokens.access_token);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"email\": \"youruser@example.com\",\n  \"password\": \"yourpassword\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/auth/login",
+					"host": ["{{base_url}}"],
+					"path": ["api", "auth", "login"]
+				}
+			},
+			"response": []
+		},
+		{
 			"name": "1. Health Check",
 			"request": {
 				"method": "GET",
@@ -69,6 +106,11 @@
 					{
 						"key": "Content-Type",
 						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
 					}
 				],
 				"body": {
@@ -87,7 +129,13 @@
 			"name": "3. Get Project Details",
 			"request": {
 				"method": "GET",
-				"header": [],
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
 				"url": {
 					"raw": "{{base_url}}/api/connect/api/v1/projects/{{project_id}}",
 					"host": ["{{base_url}}"],
@@ -122,7 +170,13 @@
 			],
 			"request": {
 				"method": "GET",
-				"header": [],
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
 				"url": {
 					"raw": "{{base_url}}/api/connect/api/v1/projects/{{project_id}}/deliverables/",
 					"host": ["{{base_url}}"],
@@ -154,7 +208,13 @@
 			"name": "6. Get Project Tasks",
 			"request": {
 				"method": "GET",
-				"header": [],
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
 				"url": {
 					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/projects/{{project_id}}/tasks",
 					"host": ["{{base_url}}"],
@@ -269,7 +329,13 @@
 			"name": "12. Delete Project-Level Task",
 			"request": {
 				"method": "DELETE",
-				"header": [],
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
 				"url": {
 					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/projects/{{project_id}}/tasks/{{task_id}}",
 					"host": ["{{base_url}}"],
@@ -282,7 +348,13 @@
 			"name": "13. List All Internal Tasks",
 			"request": {
 				"method": "GET",
-				"header": [],
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
 				"url": {
 					"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/",
 					"host": ["{{base_url}}"],
@@ -317,11 +389,36 @@
 			"name": "10. Get All Projects",
 			"request": {
 				"method": "GET",
-				"header": [],
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
 				"url": {
 					"raw": "{{base_url}}/api/connect/api/v1/projects/",
 					"host": ["{{base_url}}"],
 					"path": ["api", "connect", "api", "v1", "projects", ""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "15. Auth Logout",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{auth_token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/auth/logout",
+					"host": ["{{base_url}}"],
+					"path": ["auth", "logout"]
 				}
 			},
 			"response": []

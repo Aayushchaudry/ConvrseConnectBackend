@@ -234,6 +234,7 @@ class ProjectLifecycleOrchestrator:
                         {"phase_name": "Lighting", "fixed_days": 3, "phase_order": 4},
                         {"phase_name": "Final Deliverable", "fixed_days": max_days, "phase_order": 5},
                     ]
+                    timeline_type = "exterior"
                 elif "interior" in subtype.lower():
                     logger.info(f"🟢 Using INTERIOR timeline template for group '{subtype}'")
                     milestones = [
@@ -242,6 +243,7 @@ class ProjectLifecycleOrchestrator:
                         {"phase_name": "Modeling and Texturing and landscaping", "fixed_days": 8, "phase_order": 3},
                         {"phase_name": "Final Deliverable", "fixed_days": max_days, "phase_order": 4},
                     ]
+                    timeline_type = "interior"
                 else:
                     logger.warning(f"⚠️ Skipping group '{subtype}' (no custom timeline template defined)")
                     continue
@@ -257,6 +259,7 @@ class ProjectLifecycleOrchestrator:
                         is_milestone=False,
                         percentage_complete=0,
                         dependencies={},
+                        timeline_type=timeline_type,
                     )
                     session.add(timeline_entry)
                     timeline_entries.append(timeline_entry)

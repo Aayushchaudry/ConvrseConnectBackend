@@ -149,7 +149,7 @@ async def get_project_tasks(
     Returns simplified task data for the frontend TaskList component.
     """
     # Get auth context
-    # auth_context = require_auth(request)
+    auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select
@@ -255,7 +255,7 @@ async def update_project_task_status(
     Update the status of a project-level task.
     """
     # Get auth context
-    # auth_context = require_auth(request)
+    auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select, and_
@@ -371,7 +371,7 @@ async def delete_project_task(
     Delete a project-level task.
     """
     # Get auth context
-    # auth_context = require_auth(request)
+    auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select, and_
@@ -425,7 +425,7 @@ async def list_internal_tasks(
     Get a list of internal tasks with optional filtering.
     """
     # Get auth context
-    # auth_context = require_auth(request)
+    auth_context = require_auth(request)
     
     try:
         from sqlalchemy import select, and_

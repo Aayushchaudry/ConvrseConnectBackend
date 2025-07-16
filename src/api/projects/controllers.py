@@ -80,6 +80,7 @@ class ProjectResponse(BaseModel):
     end_date: datetime
     created_at: datetime
     updated_at: datetime
+    business_id: str  # <-- Added field to include business_id in response
 
     class Config:
         from_attributes = True  # Updated from orm_mode for Pydantic V2
@@ -95,7 +96,7 @@ async def create_project(
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),  # Inject DB session
     event_bus: EventBus = Depends(get_event_bus),  # Inject Event Bus
-    # auth_context: AuthContext = Depends(require_resource_permission("projects", "create")),  # Temporarily disabled for testing
+    auth_context: AuthContext = Depends(require_resource_permission("projects", "create")),  # Temporarily disabled for testing
 ):
     """
     Creates a new project and initiates the Project Lifecycle SAGA.
@@ -171,7 +172,7 @@ async def get_project_details(
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
-    # auth_context: AuthContext = Depends(require_resource_permission("projects", "read")),  # Temporarily disabled for testing
+    auth_context: AuthContext = Depends(require_resource_permission("projects", "read")),  # Temporarily disabled for testing
 ):
     """
     Retrieves details of a specific project by its ID.
@@ -187,10 +188,10 @@ async def get_project_details(
         )
 
     # Auth check temporarily disabled for testing
-    # if not auth_context.has_business_access(project.business_id):
-    #     raise HTTPException(
-    #         status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
-    #     )
+    if not auth_context.has_business_access(project.business_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
 
     return project
 
@@ -201,7 +202,7 @@ async def list_projects(
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),
     event_bus: EventBus = Depends(get_event_bus),
-    # auth_context: AuthContext = Depends(require_resource_permission("projects", "read")),  # Temporarily disabled for testing
+    auth_context: AuthContext = Depends(require_resource_permission("projects", "read")),  # Temporarily disabled for testing
 ):
     """
     Retrieves a list of projects.
@@ -212,12 +213,12 @@ async def list_projects(
         all_projects = await project_service.get_all_projects()
 
         # Auth check temporarily disabled for testing
-        # accessible_projects = [
-        #     project
-        #     for project in all_projects
-        #     if auth_context.has_business_access(project.business_id)
-        # ]
-        # return accessible_projects
+        accessible_projects = [
+            project
+            for project in all_projects
+            if auth_context.has_business_access(project.business_id)
+        ]
+        return accessible_projects
         return all_projects
         
     except Exception as e:

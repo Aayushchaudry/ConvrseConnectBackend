@@ -64,6 +64,7 @@ class ProjectTimelineResponse(BaseModel):
     percentage_complete: Optional[int]
     dependencies: Optional[Dict[str, Any]]
     phase_order: Optional[int]
+    timeline_type: str
     created_at: datetime
     updated_at: datetime
     
@@ -368,6 +369,7 @@ async def get_actual_timeline(
                 percentage_complete=timeline.percentage_complete,
                 dependencies=timeline.dependencies,
                 phase_order=timeline.phase_order,
+                timeline_type=timeline.timeline_type,
                 created_at=timeline.created_at,
                 updated_at=timeline.updated_at,
             )
@@ -418,6 +420,7 @@ async def get_planned_timeline(
                 percentage_complete=timeline.percentage_complete,
                 dependencies=timeline.dependencies,
                 phase_order=timeline.phase_order,
+                timeline_type=timeline.timeline_type,
                 created_at=timeline.created_at,
                 updated_at=timeline.updated_at,
             )
@@ -475,6 +478,7 @@ async def get_timeline_comparison(
                 percentage_complete=timeline.percentage_complete,
                 dependencies=timeline.dependencies,
                 phase_order=timeline.phase_order,
+                timeline_type=timeline.timeline_type,
                 created_at=timeline.created_at,
                 updated_at=timeline.updated_at,
             )
@@ -494,6 +498,7 @@ async def get_timeline_comparison(
                 percentage_complete=timeline.percentage_complete,
                 dependencies=timeline.dependencies,
                 phase_order=timeline.phase_order,
+                timeline_type=timeline.timeline_type,
                 created_at=timeline.created_at,
                 updated_at=timeline.updated_at,
             )
@@ -570,6 +575,7 @@ async def create_project_milestone(
             percentage_complete=created_milestone.percentage_complete,
             dependencies=created_milestone.dependencies,
             phase_order=created_milestone.phase_order,
+            timeline_type=created_milestone.timeline_type,
             created_at=created_milestone.created_at,
             updated_at=created_milestone.updated_at,
         )
@@ -618,6 +624,7 @@ async def get_upcoming_milestones(
                 percentage_complete=milestone.percentage_complete,
                 dependencies=milestone.dependencies,
                 phase_order=milestone.phase_order,
+                timeline_type=milestone.timeline_type,
                 created_at=milestone.created_at,
                 updated_at=milestone.updated_at,
             )

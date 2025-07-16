@@ -1,7 +1,7 @@
 # src/models/project_timeline.py
 
 import uuid
-from sqlalchemy import Column, DateTime, ForeignKey, Boolean, DECIMAL, String, Date, Integer, func, CheckConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Boolean, DECIMAL, String, Date, Integer, func, CheckConstraint, Enum as PgEnum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -49,6 +49,11 @@ class ProjectTimeline(Base):
 
     # Dependencies and relationships
     dependencies = Column(JSONB, nullable=True)  # Array of dependent phase IDs
+    timeline_type = Column(
+        PgEnum('interior', 'exterior', 'other', name='timelinetype', schema='connect_backend'),
+        nullable=False,
+        default='other'
+    )
 
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
