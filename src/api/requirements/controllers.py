@@ -11,6 +11,7 @@ from src.services.file_upload_integration_service import (
     FileUploadError,
     FileUploadErrorHandler
 )
+from src.models.requirement_file import RequirementFile
 
 import logging
 from datetime import datetime
@@ -130,6 +131,36 @@ class RequirementsSummaryResponse(BaseModel):
     requirements_by_category: Dict[str, int]
     requirements_by_priority: Dict[str, int]
     completion_percentage: float
+
+
+class RequirementFileResponse(BaseModel):
+    """Response model for requirement file."""
+    
+    id: UUID
+    requirement_id: UUID
+    platform_file_id: UUID
+    file_name: str
+    file_type: Optional[str]
+    file_size: Optional[int]
+    uploaded_by: Optional[UUID]
+    upload_timestamp: datetime
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class FileUploadResponse(BaseModel):
+    """Response model for file upload operations."""
+    
+    success: bool
+    message: str
+    uploaded_files: List[RequirementFileResponse]
+    platform_file_ids: List[UUID]
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class RequirementGenerationResponse(BaseModel):
@@ -840,4 +871,208 @@ async def get_deliverable_requirements_summary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch deliverable requirements summary: {str(e)}",
+        )
+    auth_context = require_auth(request)
+    
+    try:
+        requirement_service = RequirementService(db_session)
+        
+        # Get requirements summary
+        summary = await requirement_service.get_requirements_summary(
+            project_id=None,
+            deliverable_id=deliverable_id,
+        )
+        
+        return RequirementsSummaryResponse(
+            project_id=None,
+            deliverable_id=deliverable_id,
+            total_requirements=summary["total_requirements"],
+            mandatory_requirements=summary["mandatory_requirements"],
+            optional_requirements=summary["optional_requirements"],
+            completed_requirements=summary["completed_requirements"],
+            pending_requirements=summary["pending_requirements"],
+            requirements_by_category=summary["requirements_by_category"],
+            requirements_by_priority=summary["requirements_by_priority"],
+            completion_percentage=summary["completion_percentage"],
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching deliverable requirements summary: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch deliverable requirements summary: {str(e)}",
+        )
+
+
+# --- File Upload Endpoints ---
+
+@router.post("/{requirement_id}/files", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_requirement_files(
+    requirement_id: UUID,
+    files: List[UploadFile] = File(...),
+    request: Request = None,
+    auth_context: AuthContext = Depends(require_resource_permission("requirements", "update")),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Upload files for a requirement.
+    Requires 'requirements.update' permission.
+    """
+    logger.info(f"Uploading files for requirement {requirement_id}")
+    
+    try:
+        requirement_service = RequirementService(db_session)
+        
+        # Prepare user context
+        user_context = {
+            "user_id": str(auth_context.user_id) if auth_context.user_id else None,
+            "business_id": auth_context.business_id
+        }
+        
+        # Upload files
+        uploaded_files = await requirement_service.upload_requirement_files(
+            requirement_id=requirement_id,
+            files=files,
+            user_context=user_context
+        )
+        
+        # Convert to response format
+        file_responses = [
+            RequirementFileResponse(
+                id=file.id,
+                requirement_id=file.requirement_id,
+                platform_file_id=file.platform_file_id,
+                file_name=file.file_name,
+                file_type=file.file_type,
+                file_size=file.file_size,
+                uploaded_by=file.uploaded_by,
+                upload_timestamp=file.upload_timestamp,
+                is_active=file.is_active,
+                created_at=file.created_at,
+                updated_at=file.updated_at
+            )
+            for file in uploaded_files
+        ]
+        
+        platform_file_ids = [file.platform_file_id for file in uploaded_files]
+        
+        return FileUploadResponse(
+            success=True,
+            message=f"Successfully uploaded {len(files)} file(s)",
+            uploaded_files=file_responses,
+            platform_file_ids=platform_file_ids
+        )
+        
+    except FileUploadError as fe:
+        logger.error(f"File upload error: {fe}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File upload failed: {fe.details}"
+        )
+    except ValueError as ve:
+        logger.error(f"Validation error uploading files: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"Error uploading requirement files: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload files: {str(e)}"
+        )
+
+
+@router.get("/{requirement_id}/files", response_model=List[RequirementFileResponse])
+async def get_requirement_files(
+    requirement_id: UUID,
+    include_inactive: bool = False,
+    request: Request = None,
+    auth_context: AuthContext = Depends(require_resource_permission("requirements", "read")),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Get all files for a requirement.
+    Requires 'requirements.read' permission.
+    """
+    logger.info(f"Getting files for requirement {requirement_id}")
+    
+    try:
+        requirement_service = RequirementService(db_session)
+        
+        # Get requirement files
+        files = await requirement_service.get_requirement_files(
+            requirement_id=requirement_id,
+            include_inactive=include_inactive
+        )
+        
+        # Convert to response format
+        return [
+            RequirementFileResponse(
+                id=file.id,
+                requirement_id=file.requirement_id,
+                platform_file_id=file.platform_file_id,
+                file_name=file.file_name,
+                file_type=file.file_type,
+                file_size=file.file_size,
+                uploaded_by=file.uploaded_by,
+                upload_timestamp=file.upload_timestamp,
+                is_active=file.is_active,
+                created_at=file.created_at,
+                updated_at=file.updated_at
+            )
+            for file in files
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error getting requirement files: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get requirement files: {str(e)}"
+        )
+
+
+@router.delete("/{requirement_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_requirement_file(
+    requirement_id: UUID,
+    file_id: UUID,
+    request: Request = None,
+    auth_context: AuthContext = Depends(require_resource_permission("requirements", "update")),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Delete a requirement file (soft delete).
+    Requires 'requirements.update' permission.
+    """
+    logger.info(f"Deleting file {file_id} from requirement {requirement_id}")
+    
+    try:
+        requirement_service = RequirementService(db_session)
+        
+        # Prepare user context
+        user_context = {
+            "user_id": str(auth_context.user_id) if auth_context.user_id else None,
+            "business_id": auth_context.business_id
+        }
+        
+        # Delete file
+        deleted = await requirement_service.delete_requirement_file(
+            requirement_id=requirement_id,
+            file_id=file_id,
+            user_context=user_context
+        )
+        
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found or already deleted"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting requirement file: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete file: {str(e)}"
         )

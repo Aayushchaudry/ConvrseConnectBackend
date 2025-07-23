@@ -426,7 +426,7 @@ class FileUploadIntegrationService:
         context_id: str
     ) -> List[UUID]:
         """
-        Upload files to platform-service and return file IDs.
+        Upload files to platform-service with enhanced error handling and retry mechanisms.
         
         Args:
             files: List of files to upload
@@ -438,44 +438,135 @@ class FileUploadIntegrationService:
         """
         platform_file_ids = []
         
-        async with aiohttp.ClientSession() as session:
+        # Configure session with timeouts and connection limits
+        timeout = aiohttp.ClientTimeout(
+            total=self.connection_timeout + self.read_timeout,
+            connect=self.connection_timeout,
+            sock_read=self.read_timeout
+        )
+        
+        connector = aiohttp.TCPConnector(
+            limit=10,  # Maximum number of connections
+            limit_per_host=5,  # Maximum connections per host
+            ttl_dns_cache=300,  # DNS cache TTL
+            use_dns_cache=True
+        )
+        
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            connector=connector
+        ) as session:
+            
+            # Upload files with retry mechanism
             for file in files:
-                # Reset file pointer
+                platform_file_id = await self._upload_single_file_with_retry(
+                    session, file, context, context_id
+                )
+                platform_file_ids.append(platform_file_id)
+        
+        return platform_file_ids
+
+    async def _upload_single_file_with_retry(
+        self,
+        session: aiohttp.ClientSession,
+        file: UploadFile,
+        context: str,
+        context_id: str
+    ) -> UUID:
+        """
+        Upload a single file with retry mechanism and exponential backoff.
+        
+        Args:
+            session: aiohttp session
+            file: File to upload
+            context: Upload context
+            context_id: Context-specific ID
+            
+        Returns:
+            UUID: Platform file ID
+        """
+        last_error = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                # Reset file pointer for each attempt
                 await file.seek(0)
+                
+                # Read file content
+                file_content = await file.read()
                 
                 # Prepare form data
                 data = aiohttp.FormData()
-                data.add_field('file', await file.read(), filename=file.filename)
+                data.add_field('file', file_content, filename=file.filename)
                 data.add_field('context', context)
                 data.add_field('context_id', context_id)
+                
+                # Add additional metadata
+                if hasattr(file, 'content_type') and file.content_type:
+                    data.add_field('content_type', file.content_type)
+                if hasattr(file, 'size') and file.size:
+                    data.add_field('file_size', str(file.size))
                 
                 # Upload to platform-service
                 upload_url = f"{self.platform_service_url}/api/v1/files/upload"
                 
-                try:
-                    async with session.post(upload_url, data=data) as response:
-                        if response.status == 201:
-                            result = await response.json()
-                            platform_file_ids.append(UUID(result['file_id']))
-                        else:
-                            error_text = await response.text()
-                            raise FileUploadError(
-                                "PlatformService",
-                                "UPLOAD_FAILED",
-                                {
-                                    "status": response.status,
-                                    "error": error_text,
-                                    "filename": file.filename
-                                }
-                            )
-                except aiohttp.ClientError as e:
-                    raise FileUploadError(
-                        "PlatformService",
-                        "CONNECTION_ERROR",
-                        {"error": str(e), "filename": file.filename}
-                    )
+                async with session.post(upload_url, data=data) as response:
+                    if response.status == 201:
+                        result = await response.json()
+                        logger.info(f"Successfully uploaded file {file.filename} to platform-service")
+                        return UUID(result['file_id'])
+                    else:
+                        error_text = await response.text()
+                        error = FileUploadError(
+                            "PlatformService",
+                            "UPLOAD_FAILED",
+                            {
+                                "status": response.status,
+                                "error": error_text,
+                                "filename": file.filename,
+                                "attempt": attempt + 1
+                            }
+                        )
+                        
+                        # Don't retry for certain error types
+                        if response.status in [400, 401, 403, 413, 415]:
+                            raise error
+                        
+                        last_error = error
+                        
+            except aiohttp.ClientError as e:
+                last_error = FileUploadError(
+                    "PlatformService",
+                    "CONNECTION_ERROR",
+                    {
+                        "error": str(e), 
+                        "filename": file.filename,
+                        "attempt": attempt + 1
+                    }
+                )
+            except Exception as e:
+                last_error = FileUploadError(
+                    "PlatformService",
+                    "UNEXPECTED_ERROR",
+                    {
+                        "error": str(e), 
+                        "filename": file.filename,
+                        "attempt": attempt + 1
+                    }
+                )
+            
+            # Wait before retry (exponential backoff)
+            if attempt < self.max_retries - 1:
+                delay = self.retry_delay_base * (self.retry_backoff_factor ** attempt)
+                logger.warning(
+                    f"Upload attempt {attempt + 1} failed for {file.filename}, "
+                    f"retrying in {delay}s: {last_error}"
+                )
+                await asyncio.sleep(delay)
         
-        return platform_file_ids
+        # All retries failed
+        logger.error(f"All {self.max_retries} upload attempts failed for {file.filename}")
+        raise last_error
 
     async def _get_requirement_by_id(self, requirement_id: UUID) -> Optional[Requirement]:
         """Get requirement by ID"""
@@ -641,6 +732,69 @@ class FileUploadIntegrationService:
             logger.error(f"Error getting file upload statistics: {e}", exc_info=True)
             raise
 
+    async def upload_file_version(
+        self,
+        original_file_id: UUID,
+        new_file: UploadFile,
+        metadata: Dict[str, Any]
+    ) -> FileUploadResult:
+        """
+        Upload a new version of an existing file.
+        
+        Args:
+            original_file_id: ID of the original file
+            new_file: New file version to upload
+            metadata: Additional metadata for the upload
+            
+        Returns:
+            FileUploadResult: Result containing platform file ID and status
+        """
+        logger.info(f"Uploading new version for file {original_file_id}")
+        
+        try:
+            # Validate file
+            validation_result = await self.validate_file_types([new_file], FileUploadContext.REVIEW_ITEM)
+            if not validation_result.is_valid:
+                raise FileUploadError(
+                    "FileVersionService",
+                    "VALIDATION_ERROR",
+                    {"errors": validation_result.errors}
+                )
+            
+            # Upload file to platform-service
+            platform_file_ids = await self._upload_to_platform_service(
+                [new_file], 
+                context="file_version",
+                context_id=str(original_file_id)
+            )
+            
+            # Create file metadata
+            file_metadata = [{
+                "file_name": new_file.filename,
+                "file_type": self._get_file_extension(new_file.filename),
+                "file_size": new_file.size if hasattr(new_file, 'size') else 0,
+                "original_file_id": str(original_file_id)
+            }]
+            
+            logger.info(f"Successfully uploaded new version for file {original_file_id}")
+            
+            return FileUploadResult(
+                success=True,
+                platform_file_ids=platform_file_ids,
+                file_metadata=file_metadata,
+                warnings=validation_result.warnings
+            )
+            
+        except FileUploadError:
+            raise
+        except Exception as e:
+            logger.error(f"Error uploading file version: {e}", exc_info=True)
+            raise FileUploadError(
+                "FileVersionService",
+                "UPLOAD_ERROR",
+                {"error": str(e), "original_file_id": str(original_file_id)}
+            )
+    
     async def cleanup_orphaned_files(self) -> Dict[str, int]:
         """
         Clean up orphaned file references that may exist due to failed operations.
@@ -891,9 +1045,6 @@ class FileUploadErrorHandler:
                     "Contact support if problem persists"
                 ]
         
-        return error_responsele formats if available"
-            ]
-        
         return error_response
 
     async def retry_failed_upload(
@@ -991,142 +1142,68 @@ class FileUploadErrorHandler:
                     "Retry upload",
                     "Contact support if problem persists"
                 ]
-        
-        return error_responsele formats if available"
-            ]
-        
-        return error_response
-
-    async def retry_failed_upload(
-        self, 
-        upload_function,
-        *args,
-        **kwargs
-    ) -> Any:
-        """
-        Retry a failed upload with exponential backoff.
-        
-        Args:
-            upload_function: The upload function to retry
-            *args: Arguments for the upload function
-            **kwargs: Keyword arguments for the upload function
-            
-        Returns:
-            Result of successful upload
-        """
-        last_error = None
-        
-        for attempt in range(self.max_retries):
-            try:
-                return await upload_function(*args, **kwargs)
-            except FileUploadError as e:
-                last_error = e
-                if attempt < self.max_retries - 1:
-                    delay = self.retry_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"Upload attempt {attempt + 1} failed, retrying in {delay}s: {e}")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"All {self.max_retries} upload attempts failed")
-        
-        raise last_error
-
-    async def handle_platform_service_error(
-        self,
-        error: FileUploadError,
-        context: str
-    ) -> Dict[str, Any]:
-        """
-        Handle platform service specific errors with appropriate recovery strategies.
-        
-        Args:
-            error: The file upload error from platform service
-            context: The upload context (requirement or review_item)
-            
-        Returns:
-            Dict containing error response and recovery suggestions
-        """
-        logger.error(f"Platform service error in {context} context: {error}")
-        
-        error_response = {
-            "error_type": error.error_type,
-            "service": error.service,
-            "context": context,
-            "details": error.details,
-            "recovery_suggestions": []
-        }
-        
-        if error.error_type == "CONNECTION_ERROR":
+        elif error.error_type == "UNEXPECTED_ERROR":
             error_response["recovery_suggestions"] = [
-                "Platform service may be temporarily unavailable",
-                "Check network connectivity",
-                "Retry upload after a few minutes",
-                "Contact system administrator if problem persists"
-            ]
-        elif error.error_type == "UPLOAD_FAILED":
-            status_code = error.details.get("status", 0)
-            if status_code == 413:  # Payload too large
-                error_response["recovery_suggestions"] = [
-                    "File size exceeds platform service limits",
-                    "Try uploading smaller files",
-                    "Compress files if possible",
-                    "Contact administrator to increase limits"
-                ]
-            elif status_code == 415:  # Unsupported media type
-                error_response["recovery_suggestions"] = [
-                    "File type not supported by platform service",
-                    "Convert file to supported format",
-                    "Check file extension and content type",
-                    "Contact support for format requirements"
-                ]
-            elif status_code >= 500:  # Server error
-                error_response["recovery_suggestions"] = [
-                    "Platform service experiencing internal errors",
-                    "Retry upload after a few minutes",
-                    "Contact system administrator",
-                    "Check service status page"
-                ]
-            else:
-                error_response["recovery_suggestions"] = [
-                    "Upload failed due to platform service error",
-                    "Check file integrity and format",
-                    "Retry upload",
-                    "Contact support if problem persists"
-                ]
-        
-        return error_responsele formats if available"
+                "An unexpected error occurred during upload",
+                "Check file integrity and format",
+                "Retry upload with a different file",
+                "Contact support with error details"
             ]
         
         return error_response
 
-    async def retry_failed_upload(
-        self, 
-        upload_function,
-        *args,
-        **kwargs
-    ) -> Any:
+    async def check_platform_service_health(self) -> Dict[str, Any]:
         """
-        Retry a failed upload with exponential backoff.
+        Check the health status of the platform service.
         
-        Args:
-            upload_function: The upload function to retry
-            *args: Arguments for the upload function
-            **kwargs: Keyword arguments for the upload function
-            
         Returns:
-            Result of successful upload
+            Dict containing health status information
         """
-        last_error = None
+        try:
+            timeout = aiohttp.ClientTimeout(total=10.0)  # Short timeout for health check
+            
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                health_url = f"{self.platform_service_url}/health"
+                
+                async with session.get(health_url) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return {
+                            "status": "healthy",
+                            "response_time_ms": response.headers.get("X-Response-Time", "unknown"),
+                            "details": result
+                        }
+                    else:
+                        return {
+                            "status": "unhealthy",
+                            "status_code": response.status,
+                            "error": await response.text()
+                        }
+                        
+        except aiohttp.ClientError as e:
+            return {
+                "status": "unreachable",
+                "error": str(e)
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
+    async def get_upload_queue_status(self) -> Dict[str, Any]:
+        """
+        Get status of any queued or failed uploads for monitoring.
         
-        for attempt in range(self.max_retries):
-            try:
-                return await upload_function(*args, **kwargs)
-            except FileUploadError as e:
-                last_error = e
-                if attempt < self.max_retries - 1:
-                    delay = self.retry_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"Upload attempt {attempt + 1} failed, retrying in {delay}s: {e}")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"All {self.max_retries} upload attempts failed")
-        
-        raise last_error
+        Returns:
+            Dict containing queue status information
+        """
+        # This would typically integrate with a job queue system
+        # For now, return basic status
+        return {
+            "queued_uploads": 0,
+            "failed_uploads": 0,
+            "retry_queue_size": 0,
+            "last_successful_upload": None,
+            "last_failed_upload": None
+        }

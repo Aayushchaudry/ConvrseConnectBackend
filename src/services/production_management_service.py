@@ -225,6 +225,7 @@ class ProductionManagementService:
     async def handle_create_rework_task_command(self, command: CreateReworkTaskCommand):
         """
         Handles CreateReworkTaskCommand to create a rework task, usually due to client comments.
+        Enhanced to support parent task relationships and automatic review item generation.
         """
         logger.info(
             f"ProductionManagementService: Received CreateReworkTaskCommand for Deliverable {command.deliverable_id}, Original Task {command.original_task_id}"
@@ -258,17 +259,30 @@ class ProductionManagementService:
                 )
                 task_name = f"Rework: {original_task.task_name if original_task else 'General Rework'} - Client Comment"
 
+                # Get the review item that triggered this rework
+                from sqlalchemy import select
+                from src.models.review_item import ReviewItem
+                
+                review_item_result = await session.execute(
+                    select(ReviewItem).filter(ReviewItem.id == command.review_item_id)
+                )
+                review_item = review_item_result.scalar_one_or_none()
+                
+                # Enhanced rework task with more metadata
                 new_rework_task = InternalTask(
                     project_id=command.project_id,
                     deliverable_id=command.deliverable_id,
                     task_name=task_name,
                     task_type=task_type,  # Use original task type
                     parent_task_id=original_task.id if original_task else None,
-                    source_review_item_id=command.review_item_id,  # Use review_item_id instead of comment_id
-                    status=TaskStatus.TODO.value,  # Explicitly use .value for database
-                    priority=Priority.HIGH.value,  # Explicitly use .value for database
+                    source_review_item_id=command.review_item_id,
+                    status=TaskStatus.TODO.value,
+                    priority=Priority.HIGH.value,
                     start_date=datetime.utcnow(),
                     description=command.rework_description,
+                    is_rework=True,  # Explicitly mark as rework task
+                    estimated_hours=original_task.estimated_hours / 2 if original_task and original_task.estimated_hours else 4,  # Half the original estimate
+                    assigned_to=original_task.assigned_to if original_task else None,  # Assign to same person
                 )
                 session.add(new_rework_task)
                 await session.commit()
@@ -278,19 +292,44 @@ class ProductionManagementService:
                     f"ProductionManagementService: Created new Rework task: {new_rework_task.id} for Deliverable {command.deliverable_id}"
                 )
 
+                # Link the review feedback to the generated task if possible
+                if review_item:
+                    from src.models.review_feedback import ReviewFeedback
+                    
+                    feedback_result = await session.execute(
+                        select(ReviewFeedback)
+                        .filter(
+                            ReviewFeedback.review_item_id == review_item.id,
+                            ReviewFeedback.id == command.comment_id
+                        )
+                    )
+                    feedback = feedback_result.scalar_one_or_none()
+                    
+                    if feedback:
+                        feedback.generated_task_id = new_rework_task.id
+                        session.add(feedback)
+                        await session.commit()
+
                 # Publish event that a rework task was created
                 await self.event_bus.publish(
-                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
+                    topic="internal_task.completed",
                     message=InternalTaskCreatedEvent(
                         project_id=new_rework_task.project_id,
                         deliverable_id=new_rework_task.deliverable_id,
                         task_id=new_rework_task.id,
                         task_name=new_rework_task.task_name,
                         task_type=new_rework_task.task_type,
+                        is_rework=True,
+                        parent_task_id=new_rework_task.parent_task_id,
+                        source_review_item_id=new_rework_task.source_review_item_id
                     ).__dict__,
                 )
+                
+                return new_rework_task
+                
             except ValueError as ve:
                 logger.error(f"ProductionManagementService Error: {ve}")
+                return None
             except Exception as e:
                 logger.error(
                     f"Error creating rework task for Deliverable {command.deliverable_id}: {e}",
@@ -298,7 +337,7 @@ class ProductionManagementService:
                 )
                 await session.rollback()
                 await self.event_bus.publish(
-                    topic="internal_task.completed",  # Use existing topic that orchestrator listens to
+                    topic="internal_task.completed",
                     message=InternalTaskFailedEvent(
                         project_id=command.project_id,
                         deliverable_id=command.deliverable_id,
@@ -308,6 +347,7 @@ class ProductionManagementService:
                         reason=f"Failed to create: {str(e)}",
                     ).__dict__,
                 )
+                return None
 
     async def handle_update_internal_task_status_command(
         self, command: UpdateInternalTaskStatusCommand
@@ -452,3 +492,88 @@ class ProductionManagementService:
                 f"ProductionManagementService: Published InternalTaskCompletedEvent for Task {task.id}."
             )
             return task
+    async def create_review_items_for_completed_rework_task(
+        self, 
+        task_id: UUID, 
+        platform_file_ids: List[UUID],
+        file_metadata: List[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Create new review items for a completed rework task.
+        This is called when a rework task is completed with files.
+        
+        Args:
+            task_id: ID of the completed rework task
+            platform_file_ids: List of platform file IDs to associate with review items
+            file_metadata: Optional metadata for each file
+            
+        Returns:
+            bool: True if review items were created successfully, False otherwise
+        """
+        logger.info(f"Creating review items for completed rework task {task_id} with {len(platform_file_ids)} files")
+        
+        async with self.db_session_factory() as session:
+            try:
+                # Get the task and validate
+                task = await self._get_task_by_id(session, task_id)
+                if not task:
+                    logger.error(f"Task {task_id} not found")
+                    return False
+                
+                if not task.is_rework:
+                    logger.warning(f"Task {task_id} is not a rework task. Using standard review item creation.")
+                
+                # Get the original review item that triggered this rework
+                original_review_item = None
+                if task.source_review_item_id:
+                    from sqlalchemy import select
+                    from src.models.review_item import ReviewItem
+                    
+                    original_review_item_result = await session.execute(
+                        select(ReviewItem).filter(ReviewItem.id == task.source_review_item_id)
+                    )
+                    original_review_item = original_review_item_result.scalar_one_or_none()
+                
+                # Determine review type and round
+                review_item_type = "REWORK_REVIEW"
+                review_round = 1
+                
+                if original_review_item:
+                    # Use the same type as the original review item
+                    review_item_type = original_review_item.item_type
+                    # Increment the review round
+                    review_round = original_review_item.review_round + 1
+                
+                # If no file metadata provided, create empty metadata
+                if not file_metadata:
+                    file_metadata = [{"file_name": f"file_{i+1}", "file_type": "unknown", "file_size": 0} 
+                                    for i in range(len(platform_file_ids))]
+                
+                # Create review items using the review management service
+                from src.services.review_management_service import ReviewManagementService
+                from src.models.review_item import ReviewItemType
+                
+                review_service = ReviewManagementService(self.db_session_factory, self.event_bus)
+                
+                created_items = await review_service.create_review_items_from_task_completion(
+                    session=session,
+                    task_id=task_id,
+                    platform_file_ids=platform_file_ids,
+                    file_metadata=file_metadata,
+                    review_item_type=ReviewItemType(review_item_type)
+                )
+                
+                # Update the review round for all created items
+                for item in created_items:
+                    item.review_round = review_round
+                    session.add(item)
+                
+                await session.commit()
+                
+                logger.info(f"Created {len(created_items)} review items for rework task {task_id}, review round {review_round}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error creating review items for rework task {task_id}: {e}", exc_info=True)
+                await session.rollback()
+                return False

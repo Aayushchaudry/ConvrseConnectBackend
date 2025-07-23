@@ -97,7 +97,7 @@ class Requirement(Base):
     project_ref = relationship("Project", backref="requirements", lazy="joined")
 
     # Relationships with RequirementFiles (if requirement_type is FILE_UPLOAD)
-    # requirement_files = relationship("RequirementFile", back_populates="requirement_ref")
+    # Note: relationship is defined in RequirementFile model using backref
 
     def __repr__(self):
         """String representation for debugging."""

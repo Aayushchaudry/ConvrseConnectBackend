@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text, Integer, Boolean, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -18,6 +18,7 @@ class RequirementFile(Base):
     """
     SQLAlchemy model for the 'requirement_files' table.
     Stores metadata about files uploaded to fulfill specific requirements.
+    Enhanced to support platform-service integration and file management.
     """
 
     __tablename__ = "requirement_files"
@@ -30,17 +31,25 @@ class RequirementFile(Base):
         UUID(as_uuid=True), ForeignKey("connect_backend.requirements.id"), nullable=False
     )
 
+    # Platform-service file reference (primary file identifier)
+    platform_file_id = Column(UUID(as_uuid=True), nullable=False)
+
     # Metadata about the file
     file_name = Column(
         String(255), nullable=False
     )  # Original name of the uploaded file
     file_path = Column(
-        Text, nullable=False
-    )  # URL to the file in cloud storage (e.g., S3 URL)
-    file_type = Column(String(50), nullable=True)  # e.g., 'CAD', 'JPEG', 'PDF', 'MAX'
+        Text, nullable=True
+    )  # Legacy URL to the file in cloud storage (kept for backward compatibility)
+    file_type = Column(String(50), nullable=True)  # e.g., 'pdf', 'jpg', 'cad', 'docx'
+    file_size = Column(Integer, nullable=True)  # File size in bytes
 
-    # Who uploaded the file (if you implement a User model)
-    # uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    # Upload metadata
+    uploaded_by = Column(UUID(as_uuid=True), nullable=True)  # User ID who uploaded the file
+    upload_timestamp = Column(DateTime, default=func.now(), nullable=False)
+    
+    # File status and management
+    is_active = Column(Boolean, default=True, nullable=False)  # Soft delete support
 
     # Automatic timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
@@ -60,5 +69,6 @@ class RequirementFile(Base):
         """String representation for debugging."""
         return (
             f"<RequirementFile(id='{self.id}', requirement_id='{self.requirement_id}', "
-            f"file_name='{self.file_name}', file_type='{self.file_type}')>"
+            f"platform_file_id='{self.platform_file_id}', file_name='{self.file_name}', "
+            f"file_type='{self.file_type}', is_active={self.is_active})>"
         )

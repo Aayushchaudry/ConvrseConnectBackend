@@ -1,382 +1,426 @@
 # src/api/review_items/controllers.py
 
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.database import get_db_session  # Dependency for database session
-from src.config.event_bus import get_event_bus  # Dependency for Event Bus
-from src.events.event_bus_interface import EventBus  # Import the interface type
-from src.models.client_feedback import FeedbackType  # Import FeedbackType enum
-from src.models.review_item import (  # Import ReviewItem models and enums
-    ReviewItem,
-    ReviewItemType,
-    ReviewStatus,
-)
-from src.services.review_management_service import (
-    ReviewManagementService,
-)  # Import your ReviewManagementService
-from src.middleware.auth_middleware import require_auth, AuthContext  # Import auth middleware
-from src.middleware.permissions_middleware import require_permission
+from src.config.database import get_db_session
+from src.middleware.auth_middleware import get_required_auth_dependency
+from src.models.client_feedback import FeedbackType
+from src.models.review_feedback_result import ReviewFeedbackResult
+from src.models.review_item import ReviewItemType, ReviewStatus
+from src.services.file_upload_integration_service import FileUploadIntegrationService
+from src.services.file_version_service import FileVersionService
+from src.services.review_management_service import ReviewManagementService
 
 logger = logging.getLogger(__name__)
 
-# Create a FastAPI APIRouter instance
-router = APIRouter(tags=["Review Items"])  # Tags for API documentation (Swagger UI)
+router = APIRouter(prefix="/api/v1", tags=["review-items"])
 
 
-# --- Pydantic Schema for Request Body (Client Feedback Submission) ---
-class SubmitFeedbackRequest(BaseModel):
-    """
-    Schema for the request body when a client submits feedback on a ReviewItem.
-    """
-
-    client_user_id: Optional[UUID] = Field(
-        None,
-        description="ID of the client user submitting feedback (optional if anonymous)",
-    )
-    feedback_type: FeedbackType = Field(
-        ..., description="Type of feedback (e.g., ACCEPT, REJECT, COMMENT, LIKE)"
-    )
-    comment_text: Optional[str] = Field(None, description="Detailed comment text")
-    timestamp_seconds: Optional[int] = Field(
-        None, ge=0, description="Timestamp in seconds for video/audio comments"
-    )
-    context_coordinates: Optional[Dict[str, Any]] = Field(
-        None,
-        description='JSONB for image/3D coordinates (e.g., {"x":100, "y":200, "w":50, "h":50})',
-    )
+class ReviewItemFileResponse(BaseModel):
+    """Response model for review item file."""
+    id: str
+    review_item_id: str
+    platform_file_id: str
+    file_name: str
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    sequence_order: int
+    created_at: Optional[str] = None
+    version_info: Dict
 
 
-# --- Pydantic Schema for Response Body (ReviewItem Details) ---
-class ReviewItemResponse(BaseModel):
-    """
-    Schema for the response body when returning ReviewItem details.
-    """
-
-    id: UUID
-    project_id: UUID
-    deliverable_id: UUID
-    source_internal_task_id: UUID
-    item_type: ReviewItemType
-    platform_file_id: Optional[UUID] = None  # Add platform_file_id field
-    item_url: Optional[str] = None  # Make optional since it can be None when platform_file_id is used
-    description: Optional[str]
-    review_status: ReviewStatus
-    sequence_number: Optional[int]
-    review_round: Optional[int]
-    presented_at: datetime
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True  # Pydantic V2 equivalent of orm_mode = True
-
-
-# --- Pydantic Schema for Request Body (Creating ReviewItem) ---
-class CreateReviewItemRequest(BaseModel):
-    """
-    Schema for the request body when creating a new review item.
-    """
-
-    project_id: UUID
-    deliverable_id: UUID
-    source_internal_task_id: UUID
-    item_type: ReviewItemType
-    platform_file_id: Optional[UUID] = None  # Optional file reference from platform-service
-    item_url: Optional[str] = None  # Optional URL reference
-    description: Optional[str] = None
-    sequence_number: Optional[int] = None
-    review_round: Optional[int] = 1
-
-
-# --- Pydantic Schema for Request Body (Assigning Reviewer) ---
-class AssignReviewerRequest(BaseModel):
-    """
-    Schema for the request body when assigning a reviewer.
-    """
-
-    reviewer_id: int
-
-
-# --- Pydantic Schema for Request Body (Review Feedback) ---
 class ReviewFeedbackRequest(BaseModel):
-    """
-    Schema for the request body when submitting review feedback.
-    """
-
-    status: str
-    comments: Optional[str] = None
-    rating: Optional[int] = Field(None, ge=1, le=5)
-
-
-# --- API Endpoints ---
+    """Request model for submitting review feedback."""
+    feedback_type: str = Field(..., description="Type of feedback (ACCEPT, REJECT, COMMENT)")
+    comment_text: Optional[str] = Field(None, description="Optional comment text")
+    timestamp_seconds: Optional[int] = Field(None, description="Timestamp for video/audio feedback")
+    coordinates: Optional[Dict] = Field(None, description="Coordinates for image annotations")
+    new_platform_file_id: Optional[str] = Field(None, description="Optional ID of a new file version")
 
 
-@router.post("/review_items/{review_item_id}/feedback", include_in_schema=True)
-@router.post("/review_items/{review_item_id}/feedback/", include_in_schema=False)
-async def submit_feedback_on_review_item(
-    review_item_id: UUID,
-    feedback_data: SubmitFeedbackRequest,
-    db_session: AsyncSession = Depends(get_db_session),
-    event_bus: EventBus = Depends(get_event_bus),
+class ReviewStatusUpdateRequest(BaseModel):
+    """Request model for updating review item status."""
+    status: str = Field(..., description="New status for the review item")
+    comment: Optional[str] = Field(None, description="Optional comment about the status change")
+
+
+class TaskCompletionWithFilesRequest(BaseModel):
+    """Request model for completing a task with files."""
+    task_id: UUID = Field(..., description="ID of the task being completed")
+    review_item_type: str = Field(..., description="Type of review item to create")
+    notes: Optional[str] = Field(None, description="Optional notes about the completion")
+
+
+@router.post(
+    "/internal-tasks/{task_id}/complete-with-files",
+    status_code=status.HTTP_201_CREATED,
+    response_model=List[Dict],
+)
+async def complete_task_with_files(
+    task_id: UUID,
+    review_item_type: str = Form(...),
+    notes: Optional[str] = Form(None),
+    files: List[UploadFile] = File(...),
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
 ):
     """
-    Allows a client to submit feedback (accept, reject, comment, like) on a specific ReviewItem.
-    Publishes a ClientFeedbackSubmittedEvent.
+    Complete an internal task and create review items with uploaded files.
+    
+    This endpoint:
+    1. Uploads the files to the platform file service
+    2. Creates review items for the completed task
+    3. Associates the files with the review items
+    4. Returns the created review items with file information
     """
+    logger.info(f"Completing task {task_id} with {len(files)} files")
+    
     try:
-        # First, fetch the ReviewItem to get project_id and deliverable_id
-        from sqlalchemy import select
-
-        result = await db_session.execute(
-            select(ReviewItem).filter(ReviewItem.id == review_item_id)
-        )
-        review_item = result.scalar_one_or_none()
-
-        if not review_item:
+        # Validate review item type
+        try:
+            review_item_type_enum = ReviewItemType(review_item_type)
+        except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid review item type: {review_item_type}. Valid types: {[t.value for t in ReviewItemType]}"
             )
-
-        review_service = ReviewManagementService(
-            db_session_factory=lambda: db_session, event_bus=event_bus
+        
+        # Initialize services
+        file_upload_service = FileUploadIntegrationService(db_session)
+        review_service = ReviewManagementService(lambda: db_session, None)  # Event bus not needed for direct API calls
+        
+        # Upload files to platform service
+        review_item_metadata = {
+            "task_id": str(task_id),
+            "review_item_type": review_item_type,
+            "notes": notes,
+            "user_id": str(current_user.user_id) if current_user and current_user.user_id else None
+        }
+        
+        upload_result = await file_upload_service.upload_review_item_files(
+            task_id=task_id,
+            files=files,
+            metadata=review_item_metadata
         )
-
-        await review_service.receive_client_feedback_via_api(
-            project_id=review_item.project_id,  # Get from ReviewItem
-            deliverable_id=review_item.deliverable_id,  # Get from ReviewItem
-            review_item_id=review_item_id,
-            client_user_id=feedback_data.client_user_id,
-            feedback_type=feedback_data.feedback_type.value,  # Pass enum value as string
-            comment_text=feedback_data.comment_text,
-            timestamp_seconds=feedback_data.timestamp_seconds,
-            context_coordinates=feedback_data.context_coordinates,
+        
+        if not upload_result.success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File upload failed: {upload_result.error_message}"
+            )
+        
+        # Create review items with file associations
+        review_items = await review_service.create_review_items_from_task_completion(
+            session=db_session,
+            task_id=task_id,
+            platform_file_ids=upload_result.platform_file_ids,
+            file_metadata=upload_result.file_metadata,
+            review_item_type=review_item_type_enum
         )
-        return {"message": "Feedback submitted successfully. Processing initiated."}
-    except HTTPException:
-        raise  # Re-raise FastAPI HTTP exceptions
+        
+        # Return review items with file information
+        result = []
+        for review_item in review_items:
+            files = await review_service.get_review_item_files(review_item.id)
+            result.append({
+                "review_item_id": str(review_item.id),
+                "review_status": review_item.review_status,
+                "review_round": review_item.review_round,
+                "files": files
+            })
+        
+        return result
+        
     except ValueError as ve:
+        logger.error(f"Validation error: {ve}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input: {str(ve)}"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
         )
     except Exception as e:
-        logger.error(
-            f"Error submitting feedback for review item {review_item_id}: {e}",
-            exc_info=True,
-        )
+        logger.error(f"Error completing task with files: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to submit feedback: {str(e)}",
+            detail="An error occurred while processing your request"
         )
 
 
 @router.get(
-    "/projects/{project_id}/deliverables/{deliverable_id}/review_items/",
-    response_model=List[ReviewItemResponse],
+    "/review-items/{review_item_id}/files",
+    response_model=List[ReviewItemFileResponse],
 )
-async def list_review_items_for_deliverable(
-    project_id: UUID,
-    deliverable_id: UUID,
-    request: Request,
-    auth_context: AuthContext = Depends(require_auth),
-    db_session: AsyncSession = Depends(get_db_session),
-    event_bus: EventBus = Depends(
-        get_event_bus
-    ),  # Event bus not directly used, but consistent pattern
-):
-    """
-    Retrieves all review items for a specific deliverable.
-    """
-    review_service = ReviewManagementService(
-        db_session_factory=lambda: db_session, event_bus=event_bus
-    )
-    from sqlalchemy import select
-
-    from src.models.review_item import ReviewItem
-
-    result = await db_session.execute(
-        select(ReviewItem).filter(
-            ReviewItem.project_id == project_id,
-            ReviewItem.deliverable_id == deliverable_id,
-        )
-    )
-    review_items = result.scalars().all()
-    if not review_items:
-        # Optionally raise 404 if no review items exist, or return empty list
-        logger.info(
-            f"No review items found for deliverable {deliverable_id} in project {project_id}"
-        )
-    return review_items
-
-
-@router.get("/review_items/{review_item_id}", response_model=ReviewItemResponse)
-async def get_review_item_details(
+async def get_review_item_files(
     review_item_id: UUID,
-    request: Request,
-    auth_context: AuthContext = Depends(require_auth),
-    db_session: AsyncSession = Depends(get_db_session),
-    event_bus: EventBus = Depends(get_event_bus),
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
 ):
     """
-    Retrieves details of a specific review item by its ID.
+    Get all files associated with a review item, including version information.
     """
-    review_service = ReviewManagementService(
-        db_session_factory=lambda: db_session, event_bus=event_bus
-    )
-    from sqlalchemy import select
-
-    from src.models.review_item import ReviewItem
-
-    review_item = await db_session.execute(
-        select(ReviewItem).filter(ReviewItem.id == review_item_id)
-    ).scalar_one_or_none()
-
-    if not review_item:
+    logger.info(f"Getting files for review item {review_item_id}")
+    
+    try:
+        review_service = ReviewManagementService(lambda: db_session, None)
+        files = await review_service.get_review_item_files(review_item_id)
+        
+        return files
+        
+    except Exception as e:
+        logger.error(f"Error getting review item files: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving review item files"
         )
-    return review_item
 
 
 @router.post(
-    "/review-items/",
-    response_model=ReviewItemResponse,
+    "/review-items/{review_item_id}/feedback",
+    response_model=ReviewFeedbackResult,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_review_item(
-    review_data: CreateReviewItemRequest,
-    request: Request,
-    auth_context: AuthContext = Depends(require_auth),
-    db_session: AsyncSession = Depends(get_db_session),
-    event_bus: EventBus = Depends(get_event_bus),
-):
-    """
-    Creates a new review item.
-    """
-    try:
-        import uuid
-
-        review_item = ReviewItem(
-            id=uuid.uuid4(),
-            project_id=review_data.project_id,
-            deliverable_id=review_data.deliverable_id,
-            source_internal_task_id=review_data.source_internal_task_id,
-            item_type=review_data.item_type,
-            item_url=review_data.item_url,
-            description=review_data.description,
-            review_status=ReviewStatus.PENDING_REVIEW,
-            sequence_number=review_data.sequence_number,
-            review_round=review_data.review_round,
-            presented_at=datetime.utcnow(),
-        )
-
-        db_session.add(review_item)
-        await db_session.commit()
-        await db_session.refresh(review_item)
-
-        return review_item
-
-    except Exception as e:
-        logger.error(f"Error creating review item: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create review item: {str(e)}",
-        )
-
-
-@router.patch("/review-items/{review_item_id}/assign", response_model=Dict)
-async def assign_reviewer(
-    review_item_id: UUID,
-    assign_data: AssignReviewerRequest,
-    request: Request,
-    auth_context: AuthContext = Depends(require_auth),
-    db_session: AsyncSession = Depends(get_db_session),
-    event_bus: EventBus = Depends(get_event_bus),
-):
-    """
-    Assigns a reviewer to a review item.
-    """
-    try:
-        from sqlalchemy import select
-
-        result = await db_session.execute(
-            select(ReviewItem).filter(ReviewItem.id == review_item_id)
-        )
-        review_item = result.scalar_one_or_none()
-
-        if not review_item:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found"
-            )
-
-        # For now, just return the review item with a mock reviewer_id field
-        response_data = ReviewItemResponse.model_validate(review_item)
-        response_dict = response_data.model_dump()
-        response_dict["reviewer_id"] = assign_data.reviewer_id
-
-        return response_dict
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error assigning reviewer: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to assign reviewer: {str(e)}",
-        )
-
-
-@router.patch("/review-items/{review_item_id}/feedback", response_model=Dict)
 async def submit_review_feedback(
     review_item_id: UUID,
-    feedback_data: ReviewFeedbackRequest,
-    request: Request,
-    auth_context: AuthContext = Depends(require_auth),
-    db_session: AsyncSession = Depends(get_db_session),
-    event_bus: EventBus = Depends(get_event_bus),
+    feedback: ReviewFeedbackRequest,
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
 ):
     """
-    Submits review feedback for a review item.
+    Submit feedback for a review item.
+    
+    This endpoint:
+    1. Creates a feedback record with the provided details
+    2. Updates the review item status based on the feedback type
+    3. Creates rework tasks automatically for rejected items
+    4. Returns the result of the feedback submission
     """
+    logger.info(f"Submitting feedback for review item {review_item_id}")
+    
     try:
-        from sqlalchemy import select
-
-        result = await db_session.execute(
-            select(ReviewItem).filter(ReviewItem.id == review_item_id)
-        )
-        review_item = result.scalar_one_or_none()
-
-        if not review_item:
+        # Validate feedback type
+        try:
+            feedback_type = FeedbackType(feedback.feedback_type)
+        except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid feedback type: {feedback.feedback_type}. Valid types: {[t.value for t in FeedbackType]}"
             )
-
-        # Update review status based on feedback
-        if feedback_data.status == "approved":
-            review_item.review_status = ReviewStatus.ACCEPTED
-        elif feedback_data.status == "rejected":
-            review_item.review_status = ReviewStatus.REJECTED
-
-        await db_session.commit()
-
-        return {
-            "id": str(review_item.id),
-            "status": feedback_data.status,
-            "comments": feedback_data.comments,
-            "rating": feedback_data.rating,
-        }
-
-    except HTTPException:
-        raise
+        
+        # Initialize service
+        review_service = ReviewManagementService(lambda: db_session, None)  # Event bus not needed for direct API calls
+        
+        # Convert new_platform_file_id to UUID if provided
+        new_platform_file_id = None
+        if feedback.new_platform_file_id:
+            try:
+                new_platform_file_id = UUID(feedback.new_platform_file_id)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid new_platform_file_id: {feedback.new_platform_file_id}"
+                )
+        
+        # Submit feedback
+        result = await review_service.submit_review_feedback(
+            review_item_id=review_item_id,
+            feedback_type=feedback.feedback_type,
+            comment_text=feedback.comment_text,
+            timestamp_seconds=feedback.timestamp_seconds,
+            coordinates=feedback.coordinates,
+            submitted_by=current_user.user_id if current_user and current_user.user_id else None,
+            new_platform_file_id=new_platform_file_id
+        )
+        
+        return result
+        
+    except ValueError as ve:
+        logger.error(f"Validation error: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
     except Exception as e:
-        logger.error(f"Error submitting feedback: {e}", exc_info=True)
+        logger.error(f"Error submitting review feedback: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to submit feedback: {str(e)}",
+            detail="An error occurred while submitting review feedback"
+        )
+
+
+@router.get(
+    "/review-items/{review_item_id}/feedback",
+    response_model=List[Dict],
+)
+async def get_review_feedback_history(
+    review_item_id: UUID,
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
+):
+    """
+    Get feedback history for a review item.
+    
+    This endpoint returns all feedback entries for a review item, ordered by submission time (newest first).
+    """
+    logger.info(f"Getting feedback history for review item {review_item_id}")
+    
+    try:
+        # Initialize service
+        review_service = ReviewManagementService(lambda: db_session, None)
+        
+        # Get feedback history
+        feedback_history = await review_service.get_review_feedback_history(review_item_id)
+        
+        return feedback_history
+        
+    except Exception as e:
+        logger.error(f"Error getting feedback history: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving feedback history"
+        )
+
+
+@router.put(
+    "/review-items/{review_item_id}/status",
+    response_model=Dict,
+)
+async def update_review_item_status(
+    review_item_id: UUID,
+    status_update: ReviewStatusUpdateRequest,
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
+):
+    """
+    Update the status of a review item.
+    
+    This endpoint:
+    1. Updates the review item status
+    2. Creates a feedback entry to record the status change
+    3. Triggers appropriate actions based on the new status (e.g., creating rework tasks)
+    """
+    logger.info(f"Updating status of review item {review_item_id} to {status_update.status}")
+    
+    try:
+        # Validate status
+        try:
+            new_status = ReviewStatus(status_update.status)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status: {status_update.status}. Valid statuses: {[s.value for s in ReviewStatus]}"
+            )
+        
+        # Initialize service
+        review_service = ReviewManagementService(lambda: db_session, None)
+        
+        # Update status
+        updated_item = await review_service.update_review_item_status(
+            review_item_id=review_item_id,
+            status=status_update.status,
+            user_id=current_user.user_id if current_user and current_user.user_id else None,
+            comment=status_update.comment
+        )
+        
+        # Return updated item
+        return {
+            "review_item_id": str(updated_item.id),
+            "status": updated_item.review_status,
+            "updated_at": updated_item.updated_at.isoformat() if updated_item.updated_at else None
+        }
+        
+    except ValueError as ve:
+        logger.error(f"Validation error: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"Error updating review item status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while updating review item status"
+        )
+
+
+@router.put(
+    "/review-items/{review_item_id}/files/{file_id}/version",
+    response_model=Dict,
+)
+async def create_file_version(
+    review_item_id: UUID,
+    file_id: UUID,
+    new_file: UploadFile = File(...),
+    version_notes: Optional[str] = Form(None),
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
+):
+    """
+    Create a new version of a review item file.
+    
+    This endpoint:
+    1. Uploads the new file version to the platform file service
+    2. Creates a version record linking the original file to the new version
+    3. Returns the version information
+    """
+    logger.info(f"Creating new version for file {file_id} in review item {review_item_id}")
+    
+    try:
+        # Initialize services
+        file_upload_service = FileUploadIntegrationService(db_session)
+        file_version_service = FileVersionService(db_session)
+        
+        # Upload the new file version
+        metadata = {
+            "review_item_id": str(review_item_id),
+            "original_file_id": str(file_id),
+            "version_notes": version_notes,
+            "user_id": str(current_user.user_id) if current_user and current_user.user_id else None
+        }
+        
+        upload_result = await file_upload_service.upload_file_version(
+            original_file_id=file_id,
+            new_file=new_file,
+            metadata=metadata
+        )
+        
+        if not upload_result.success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File upload failed: {upload_result.error_message}"
+            )
+        
+        # Create file version record
+        new_version = await file_version_service.create_file_version(
+            original_file_id=file_id,
+            new_file_id=upload_result.platform_file_ids[0],
+            version_type="revision",
+            created_by=current_user.user_id if current_user and current_user.user_id else None,
+            version_notes=version_notes
+        )
+        
+        # Return version information
+        return {
+            "version_id": str(new_version.id),
+            "original_file_id": str(new_version.original_file_id),
+            "current_file_id": str(new_version.current_file_id),
+            "version_number": new_version.version_number,
+            "version_type": new_version.version_type,
+            "created_at": new_version.created_at.isoformat() if new_version.created_at else None
+        }
+        
+    except ValueError as ve:
+        logger.error(f"Validation error: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"Error creating file version: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while creating the file version"
         )
