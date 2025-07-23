@@ -1,0 +1,26 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../auth-service"
+		},
+		{
+			"path": "../../../../ConvrseConnectFrontend"
+		},
+		{
+			"path": "../../../../devsecops"
+		},
+		{
+			"path": "../../../../infra"
+		},
+		{
+			"path": "../../../../instructions"
+		},
+		{
+			"path": "../../../../platform-service"
+		}
+	],
+	"settings": {}
+}

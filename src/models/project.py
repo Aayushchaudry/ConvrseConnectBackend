@@ -68,8 +68,8 @@ class Project(Base):
     # --- AUTH INTEGRATION FIELDS ---
     # Business context - links project to a business from auth-service
     business_id = Column(
-        String(255), nullable=False, index=True
-    )  # Foreign key to businesses table in auth-service
+        UUID(as_uuid=True), nullable=False, index=True
+    )  # Foreign key to businesses table in auth-service (now UUID)
 
     # User context - who created and is assigned to this project
     created_by = Column(
