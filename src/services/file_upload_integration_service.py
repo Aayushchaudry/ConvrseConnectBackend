@@ -22,6 +22,11 @@ from src.models.internal_task import InternalTask
 from src.models.deliverable import Deliverable
 from src.models.project import Project
 from src.models.file_version import FileVersion, VersionType
+from src.utils.file_upload_errors import (
+    FileUploadError, ValidationError, NetworkError, StorageError,
+    ExternalServiceError, ErrorSeverity, ErrorCategory
+)
+from src.services.file_upload_error_handler import FileUploadErrorHandler
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +42,6 @@ class ValidationResult(BaseModel):
     is_valid: bool
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
-
-
-class FileUploadError(Exception):
-    """Custom exception for file upload errors"""
-    def __init__(self, service: str, error_type: str, details: dict):
-        self.service = service
-        self.error_type = error_type
-        self.details = details
-        super().__init__(f"{service} error ({error_type}): {details}")
 
 
 class RequirementFileMetadata(BaseModel):
@@ -90,6 +86,7 @@ class FileUploadIntegrationService:
         """
         self.db_session = db_session
         self.platform_service_url = platform_service_url or "http://platform-service:8000"
+        self.error_handler = FileUploadErrorHandler(db_session)
         
         # Enhanced retry configuration
         self.max_retries = 3
@@ -161,18 +158,22 @@ class FileUploadIntegrationService:
             requirement = await self._get_requirement_by_id(requirement_id)
             if not requirement:
                 raise FileUploadError(
-                    "RequirementService", 
-                    "NOT_FOUND", 
-                    {"requirement_id": str(requirement_id)}
+                    service="RequirementService",
+                    error_type="NOT_FOUND",
+                    details={"requirement_id": str(requirement_id)},
+                    severity=ErrorSeverity.MEDIUM,
+                    category=ErrorCategory.BUSINESS_LOGIC,
+                    user_message="The specified requirement was not found.",
+                    recovery_suggestions=["Verify the requirement ID is correct"]
                 )
             
             # Validate files
             validation_result = await self.validate_file_types(files, FileUploadContext.REQUIREMENT)
             if not validation_result.is_valid:
-                raise FileUploadError(
-                    "RequirementService",
-                    "VALIDATION_ERROR",
-                    {"errors": validation_result.errors}
+                raise ValidationError(
+                    service="RequirementService",
+                    validation_errors=validation_result.errors,
+                    context={"requirement_id": str(requirement_id)}
                 )
             
             # Upload files to platform-service
@@ -214,17 +215,31 @@ class FileUploadIntegrationService:
                 warnings=validation_result.warnings
             )
             
-        except FileUploadError:
+        except FileUploadError as e:
             await self.db_session.rollback()
+            # Handle the error through the error handler
+            recovery_result = await self.error_handler.handle_requirement_upload_error(
+                e, requirement_id, {"files_count": len(files)}
+            )
+            logger.error(f"File upload error handled: {recovery_result.recovery_message}")
             raise
         except Exception as e:
             await self.db_session.rollback()
             logger.error(f"Error uploading requirement files: {e}", exc_info=True)
-            raise FileUploadError(
-                "RequirementService",
-                "UPLOAD_ERROR",
-                {"error": str(e), "requirement_id": str(requirement_id)}
+            upload_error = FileUploadError(
+                service="RequirementService",
+                error_type="UPLOAD_ERROR",
+                details={"error": str(e), "requirement_id": str(requirement_id)},
+                severity=ErrorSeverity.HIGH,
+                category=ErrorCategory.SYSTEM,
+                user_message="An unexpected error occurred while uploading files.",
+                recovery_suggestions=["Try uploading again", "Contact support if the issue persists"]
             )
+            # Handle through error handler
+            await self.error_handler.handle_requirement_upload_error(
+                upload_error, requirement_id, {"files_count": len(files)}
+            )
+            raise upload_error
 
     async def upload_review_item_files(
         self, 
@@ -250,18 +265,22 @@ class FileUploadIntegrationService:
             task = await self._get_task_by_id(task_id)
             if not task:
                 raise FileUploadError(
-                    "ReviewItemService", 
-                    "NOT_FOUND", 
-                    {"task_id": str(task_id)}
+                    service="ReviewItemService",
+                    error_type="NOT_FOUND",
+                    details={"task_id": str(task_id)},
+                    severity=ErrorSeverity.MEDIUM,
+                    category=ErrorCategory.BUSINESS_LOGIC,
+                    user_message="The specified task was not found.",
+                    recovery_suggestions=["Verify the task ID is correct"]
                 )
             
             # Validate files
             validation_result = await self.validate_file_types(files, FileUploadContext.REVIEW_ITEM)
             if not validation_result.is_valid:
-                raise FileUploadError(
-                    "ReviewItemService",
-                    "VALIDATION_ERROR",
-                    {"errors": validation_result.errors}
+                raise ValidationError(
+                    service="ReviewItemService",
+                    validation_errors=validation_result.errors,
+                    context={"task_id": str(task_id)}
                 )
             
             # Upload files to platform-service
@@ -306,17 +325,31 @@ class FileUploadIntegrationService:
                 warnings=validation_result.warnings
             )
             
-        except FileUploadError:
+        except FileUploadError as e:
             await self.db_session.rollback()
+            # Handle the error through the error handler
+            recovery_result = await self.error_handler.handle_review_item_upload_error(
+                e, task_id, {"files_count": len(files)}
+            )
+            logger.error(f"File upload error handled: {recovery_result.recovery_message}")
             raise
         except Exception as e:
             await self.db_session.rollback()
             logger.error(f"Error uploading review item files: {e}", exc_info=True)
-            raise FileUploadError(
-                "ReviewItemService",
-                "UPLOAD_ERROR",
-                {"error": str(e), "task_id": str(task_id)}
+            upload_error = FileUploadError(
+                service="ReviewItemService",
+                error_type="UPLOAD_ERROR",
+                details={"error": str(e), "task_id": str(task_id)},
+                severity=ErrorSeverity.HIGH,
+                category=ErrorCategory.SYSTEM,
+                user_message="An unexpected error occurred while uploading files.",
+                recovery_suggestions=["Try uploading again", "Contact support if the issue persists"]
             )
+            # Handle through error handler
+            await self.error_handler.handle_review_item_upload_error(
+                upload_error, task_id, {"files_count": len(files)}
+            )
+            raise upload_error
 
     async def validate_file_types(
         self, 
@@ -517,16 +550,56 @@ class FileUploadIntegrationService:
                         return UUID(result['file_id'])
                     else:
                         error_text = await response.text()
-                        error = FileUploadError(
-                            "PlatformService",
-                            "UPLOAD_FAILED",
-                            {
-                                "status": response.status,
-                                "error": error_text,
-                                "filename": file.filename,
-                                "attempt": attempt + 1
-                            }
-                        )
+                        
+                        # Create appropriate error type based on status code
+                        if response.status == 401:
+                            error = FileUploadError(
+                                service="PlatformService",
+                                error_type="AUTHENTICATION_ERROR",
+                                details={"status": response.status, "error": error_text, "filename": file.filename},
+                                severity=ErrorSeverity.CRITICAL,
+                                category=ErrorCategory.AUTHENTICATION
+                            )
+                        elif response.status == 403:
+                            error = FileUploadError(
+                                service="PlatformService",
+                                error_type="AUTHORIZATION_ERROR",
+                                details={"status": response.status, "error": error_text, "filename": file.filename},
+                                severity=ErrorSeverity.HIGH,
+                                category=ErrorCategory.AUTHORIZATION
+                            )
+                        elif response.status == 413:
+                            error = FileUploadError(
+                                service="PlatformService",
+                                error_type="FILE_TOO_LARGE",
+                                details={"status": response.status, "error": error_text, "filename": file.filename},
+                                severity=ErrorSeverity.MEDIUM,
+                                category=ErrorCategory.VALIDATION,
+                                user_message="The uploaded file is too large."
+                            )
+                        elif response.status == 415:
+                            error = FileUploadError(
+                                service="PlatformService",
+                                error_type="UNSUPPORTED_FORMAT",
+                                details={"status": response.status, "error": error_text, "filename": file.filename},
+                                severity=ErrorSeverity.MEDIUM,
+                                category=ErrorCategory.VALIDATION,
+                                user_message="The file format is not supported."
+                            )
+                        elif response.status >= 500:
+                            error = ExternalServiceError(
+                                service="FileUploadService",
+                                external_service="PlatformService",
+                                service_details={"status": response.status, "error": error_text, "filename": file.filename}
+                            )
+                        else:
+                            error = FileUploadError(
+                                service="PlatformService",
+                                error_type="UPLOAD_FAILED",
+                                details={"status": response.status, "error": error_text, "filename": file.filename},
+                                severity=ErrorSeverity.HIGH,
+                                category=ErrorCategory.EXTERNAL_SERVICE
+                            )
                         
                         # Don't retry for certain error types
                         if response.status in [400, 401, 403, 413, 415]:
@@ -535,24 +608,27 @@ class FileUploadIntegrationService:
                         last_error = error
                         
             except aiohttp.ClientError as e:
-                last_error = FileUploadError(
-                    "PlatformService",
-                    "CONNECTION_ERROR",
-                    {
-                        "error": str(e), 
+                last_error = NetworkError(
+                    service="PlatformService",
+                    network_details={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
                         "filename": file.filename,
                         "attempt": attempt + 1
                     }
                 )
             except Exception as e:
                 last_error = FileUploadError(
-                    "PlatformService",
-                    "UNEXPECTED_ERROR",
-                    {
-                        "error": str(e), 
+                    service="PlatformService",
+                    error_type="UNEXPECTED_ERROR",
+                    details={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
                         "filename": file.filename,
                         "attempt": attempt + 1
-                    }
+                    },
+                    severity=ErrorSeverity.HIGH,
+                    category=ErrorCategory.SYSTEM
                 )
             
             # Wait before retry (exponential backoff)
@@ -755,10 +831,10 @@ class FileUploadIntegrationService:
             # Validate file
             validation_result = await self.validate_file_types([new_file], FileUploadContext.REVIEW_ITEM)
             if not validation_result.is_valid:
-                raise FileUploadError(
-                    "FileVersionService",
-                    "VALIDATION_ERROR",
-                    {"errors": validation_result.errors}
+                raise ValidationError(
+                    service="FileVersionService",
+                    validation_errors=validation_result.errors,
+                    context={"original_file_id": str(original_file_id)}
                 )
             
             # Upload file to platform-service

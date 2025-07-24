@@ -79,14 +79,14 @@ class DeliverableDeliveredEvent(BaseEvent):
     project_id: UUID
     deliverable_id: UUID
     deliverable_name: str
-    final_output_url: str
+    output_id: UUID
 
     def __init__(
         self,
         project_id: UUID,
         deliverable_id: UUID,
         deliverable_name: str,
-        final_output_url: str,
+        output_id: UUID,
     ):
         super().__init__(
             event_id=uuid.uuid4(),
@@ -96,7 +96,7 @@ class DeliverableDeliveredEvent(BaseEvent):
         self.project_id = project_id
         self.deliverable_id = deliverable_id
         self.deliverable_name = deliverable_name
-        self.final_output_url = final_output_url
+        self.output_id = output_id
 
 
 @dataclass
@@ -146,8 +146,9 @@ class ProjectCompletedEvent(BaseEvent):
     project_id: UUID
     project_name: str
     completion_date: datetime
+    compilation_url: Optional[str] = None
 
-    def __init__(self, project_id: UUID, project_name: str, completion_date: datetime):
+    def __init__(self, project_id: UUID, project_name: str, completion_date: datetime, compilation_url: Optional[str] = None):
         super().__init__(
             event_id=uuid.uuid4(),
             timestamp=datetime.utcnow(),
@@ -156,6 +157,7 @@ class ProjectCompletedEvent(BaseEvent):
         self.project_id = project_id
         self.project_name = project_name
         self.completion_date = completion_date
+        self.compilation_url = compilation_url
 
 
 @dataclass

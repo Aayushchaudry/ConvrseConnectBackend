@@ -9,7 +9,7 @@ import zipfile
 import tempfile
 import shutil
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Set
 from uuid import UUID
 
 from sqlalchemy import select, and_, func
@@ -329,17 +329,29 @@ class ProjectOutputService:
                 
                 # Create a temporary directory for compilation
                 with tempfile.TemporaryDirectory() as temp_dir:
-                    # Download all files to the temporary directory
-                    for file_id in file_ids_to_download:
+                    # Create subdirectories based on review item types
+                    review_types = set(file["review_item_type"] for file in file_data)
+                    for review_type in review_types:
+                        type_dir = os.path.join(temp_dir, review_type)
+                        os.makedirs(type_dir, exist_ok=True)
+                    
+                    # Download all files to the temporary directory, organized by review item type
+                    for i, file_id in enumerate(file_ids_to_download):
+                        file_info = file_data[i]
                         file_name = file_names_map.get(str(file_id), f"file_{file_id}.bin")
-                        file_path = os.path.join(temp_dir, file_name)
+                        
+                        # Organize files by review item type
+                        review_type = file_info["review_item_type"]
+                        type_dir = os.path.join(temp_dir, review_type)
+                        
+                        # Add sequence number to filename to maintain order
+                        sequence = file_info.get("sequence_number", 0)
+                        base_name, ext = os.path.splitext(file_name)
+                        organized_file_name = f"{sequence:03d}_{base_name}{ext}"
+                        file_path = os.path.join(type_dir, organized_file_name)
                         
                         # In a real implementation, this would download from the platform file service
-                        # await self.platform_file_service.download_file(file_id, file_path)
-                        
-                        # For demonstration, create placeholder files
-                        with open(file_path, 'w') as f:
-                            f.write(f"Placeholder content for file {file_id}")
+                        await self.platform_file_service.download_file(UUID(file_id), file_path)
                         
                         logger.info(f"Downloaded file {file_id} to {file_path}")
                     
@@ -349,6 +361,18 @@ class ProjectOutputService:
                         with open(metadata_path, 'w') as f:
                             json.dump(metadata, f, indent=2)
                         logger.info(f"Created metadata.json with {len(metadata)} fields")
+                    
+                    # Create a README file with instructions
+                    readme_path = os.path.join(temp_dir, "README.txt")
+                    with open(readme_path, 'w') as f:
+                        f.write(f"Deliverable: {deliverable.deliverable_name}\n")
+                        f.write(f"Output: {output.output_name}\n")
+                        f.write(f"Compilation Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                        f.write("This package contains the final approved files for this deliverable.\n")
+                        f.write("Files are organized by review item type in separate folders.\n\n")
+                        f.write("Contents:\n")
+                        for review_type in review_types:
+                            f.write(f"- {review_type}/: Files related to {review_type}\n")
                     
                     # Create zip file
                     zip_filename = f"{output_identifier}.zip"
@@ -366,10 +390,16 @@ class ProjectOutputService:
                     logger.info(f"Created zip file: {zip_path}")
                     
                     # In a real implementation, upload the zip file to a storage service
-                    # zip_url = await self.platform_file_service.upload_file(zip_path)
+                    # For now, we'll simulate this with the platform file service
+                    file_id = await self.platform_file_service.upload_file(zip_path, {
+                        "output_id": str(output_id),
+                        "deliverable_id": str(deliverable_id),
+                        "file_type": "application/zip",
+                        "is_compiled_output": True
+                    })
                     
-                    # For demonstration, use a placeholder URL
-                    output_url = f"https://example.com/api/compiled-outputs/{output_identifier}.zip"
+                    # Create a real URL to the compiled output
+                    output_url = f"https://example.com/api/compiled-outputs/{file_id}/{output_identifier}.zip"
                     
                     # Update the output URL to point to the compiled output
                     output.output_url = output_url
@@ -581,6 +611,13 @@ class ProjectOutputService:
                     logger.warning(f"No project outputs found for project {project_id}")
                     return None
                 
+                # Get all deliverables for this project to include in metadata
+                deliverables_result = await session.execute(
+                    select(Deliverable).filter(Deliverable.project_id == project_id)
+                )
+                deliverables = deliverables_result.scalars().all()
+                deliverables_map = {d.id: d for d in deliverables}
+                
                 # Create metadata for the project compilation
                 compilation_metadata = {
                     "project_id": str(project_id),
@@ -592,6 +629,7 @@ class ProjectOutputService:
                             "output_id": str(output.id),
                             "output_name": output.output_name,
                             "deliverable_id": str(output.deliverable_id),
+                            "deliverable_name": deliverables_map.get(output.deliverable_id).deliverable_name if output.deliverable_id in deliverables_map else "Unknown",
                             "output_url": output.output_url,
                             "delivery_date": output.delivery_date.isoformat() if output.delivery_date else None
                         }
@@ -599,14 +637,87 @@ class ProjectOutputService:
                     ]
                 }
                 
-                # In a real implementation, this would:
-                # 1. Download all project outputs
-                # 2. Compile them into a single package
-                # 3. Upload to a storage service
-                # 4. Return the URL to the compiled package
-                
-                # For now, we'll simulate this process
-                compilation_url = f"https://example.com/api/project-compilations/{project_id}"
+                # Create a temporary directory for compilation
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Create a directory structure for the project compilation
+                    project_dir = os.path.join(temp_dir, f"{project.project_name.replace(' ', '_')}")
+                    os.makedirs(project_dir, exist_ok=True)
+                    
+                    # Create metadata.json
+                    metadata_path = os.path.join(project_dir, "project_metadata.json")
+                    with open(metadata_path, 'w') as f:
+                        json.dump(compilation_metadata, f, indent=2)
+                    
+                    # Create a README file
+                    readme_path = os.path.join(project_dir, "README.txt")
+                    with open(readme_path, 'w') as f:
+                        f.write(f"Project: {project.project_name}\n")
+                        f.write(f"Compilation Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                        f.write("This package contains all deliverables for this project.\n")
+                        f.write("Each deliverable is in its own directory.\n\n")
+                        f.write("Contents:\n")
+                        for output in outputs:
+                            deliverable_name = deliverables_map.get(output.deliverable_id).deliverable_name if output.deliverable_id in deliverables_map else "Unknown"
+                            f.write(f"- {deliverable_name}/: {output.output_name}\n")
+                    
+                    # Create directories for each deliverable and download their outputs
+                    for output in outputs:
+                        deliverable = deliverables_map.get(output.deliverable_id)
+                        if not deliverable:
+                            continue
+                            
+                        # Create directory for this deliverable
+                        deliverable_dir = os.path.join(project_dir, deliverable.deliverable_name.replace(' ', '_'))
+                        os.makedirs(deliverable_dir, exist_ok=True)
+                        
+                        # Extract output URL to get file ID
+                        # In a real implementation, this would parse the URL to get the file ID
+                        # For now, we'll simulate this
+                        output_url = output.output_url
+                        file_id_match = output_url.split('/')[-2] if '/' in output_url else None
+                        
+                        if file_id_match:
+                            try:
+                                file_id = UUID(file_id_match)
+                                output_file_path = os.path.join(deliverable_dir, f"{output.output_name.replace(' ', '_')}.zip")
+                                
+                                # Download the output file
+                                # In a real implementation, this would download from the platform file service
+                                await self.platform_file_service.download_file(file_id, output_file_path)
+                                logger.info(f"Downloaded output {output.id} to {output_file_path}")
+                            except ValueError:
+                                # Not a valid UUID, create a placeholder file
+                                output_file_path = os.path.join(deliverable_dir, f"{output.output_name.replace(' ', '_')}.txt")
+                                with open(output_file_path, 'w') as f:
+                                    f.write(f"Placeholder for output {output.id} at URL: {output_url}")
+                        else:
+                            # Create a placeholder file with the output URL
+                            output_file_path = os.path.join(deliverable_dir, f"{output.output_name.replace(' ', '_')}.txt")
+                            with open(output_file_path, 'w') as f:
+                                f.write(f"Output URL: {output_url}")
+                    
+                    # Create zip file of the entire project
+                    zip_filename = f"{project.project_name.replace(' ', '_')}_complete.zip"
+                    zip_path = os.path.join(temp_dir, zip_filename)
+                    
+                    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                        for root, _, files in os.walk(project_dir):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                arcname = os.path.relpath(file_path, temp_dir)
+                                zipf.write(file_path, arcname)
+                    
+                    logger.info(f"Created project compilation zip file: {zip_path}")
+                    
+                    # Upload the zip file to the platform file service
+                    file_id = await self.platform_file_service.upload_file(zip_path, {
+                        "project_id": str(project_id),
+                        "file_type": "application/zip",
+                        "is_project_compilation": True
+                    })
+                    
+                    # Create a URL to the compiled project
+                    compilation_url = f"https://example.com/api/project-compilations/{file_id}/{project.project_name.replace(' ', '_')}_complete.zip"
                 
                 logger.info(f"Created project compilation for project {project_id}: {compilation_url}")
                 return compilation_url
@@ -662,6 +773,7 @@ class ProjectOutputService:
         logger.info("Checking for deliverables with all reviews approved for automatic output generation")
         
         created_outputs = {}
+        projects_to_check = set()
         
         async with self.db_session_factory() as session:
             try:
@@ -697,6 +809,13 @@ class ProjectOutputService:
                                 
                                 # Compile the final deliverable
                                 await self.compile_final_deliverable(deliverable.id, output.id)
+                                
+                                # Add project to the list of projects to check for completion
+                                projects_to_check.add(deliverable.project_id)
+                
+                # Check if any projects are now complete
+                for project_id in projects_to_check:
+                    await self.process_project_completion(project_id)
                 
                 return created_outputs
                 
