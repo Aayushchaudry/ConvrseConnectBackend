@@ -1157,8 +1157,9 @@ class DeliverableSagaOrchestrator:
                 logger.info(f"Created project output {output.id} for deliverable {command.deliverable_id}")
                 
             except Exception as e:
-                logger.error(f"Error handling GenerateFinalOutputCommand: {e}", exc_info=True)    a
-sync def handle_generate_final_output_command(self, command: GenerateFinalOutputCommand):
+                logger.error(f"Error handling GenerateFinalOutputCommand: {e}", exc_info=True)
+
+    async def handle_generate_final_output_command(self, command: GenerateFinalOutputCommand):
         """
         Handles GenerateFinalOutputCommand.
         This command triggers the generation of a final project output for a deliverable.

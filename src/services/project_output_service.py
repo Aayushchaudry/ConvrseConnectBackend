@@ -762,7 +762,8 @@ class ProjectOutputService:
         
         # All deliverables must be delivered
         return delivered_count > 0 and delivered_count == total_count 
-   async def generate_outputs_for_approved_deliverables(self) -> Dict[UUID, UUID]:
+    
+    async def generate_outputs_for_approved_deliverables(self) -> Dict[UUID, UUID]:
         """
         Automatically generate project outputs for all deliverables that have all reviews approved
         but don't have project outputs yet.

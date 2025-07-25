@@ -33,6 +33,31 @@ class TaskProgressRequest(BaseModel):
     notes: Optional[str] = Field(None, max_length=1000, description="Progress notes")
 
 
+class UpdateActualDatesRequest(BaseModel):
+    """Request model for updating actual start and end dates."""
+    
+    actual_start_date: Optional[date] = Field(None, description="Actual start date")
+    actual_end_date: Optional[date] = Field(None, description="Actual end date")
+    notes: Optional[str] = Field(None, max_length=1000, description="Notes about the date changes")
+
+
+class TimelinePhaseUpdateResponse(BaseModel):
+    """Response model for timeline phase updates."""
+    
+    id: UUID
+    phase_name: str
+    planned_start_date: Optional[date]
+    planned_end_date: Optional[date]
+    actual_start_date: Optional[date]
+    actual_end_date: Optional[date]
+    variance_days: Optional[int]
+    variance_status: str
+    notes: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
 class TaskProgressResponse(BaseModel):
     """Response model for task progress data."""
     
@@ -636,4 +661,184 @@ async def get_upcoming_milestones(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch upcoming milestones: {str(e)}",
+        )
+
+
+@router.put("/{timeline_id}/actual-dates", response_model=TimelinePhaseUpdateResponse)
+async def update_timeline_actual_dates(
+    timeline_id: UUID,
+    update_data: UpdateActualDatesRequest,
+    request: Request,
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Update actual start and end dates for a timeline phase.
+    """
+    auth_context = require_auth(request)
+    
+    try:
+        timeline_service = TimelineTrackingService(db_session)
+        
+        # Update the timeline phase with actual dates
+        updated_timeline = await timeline_service.update_timeline_actual_dates(
+            timeline_id=timeline_id,
+            actual_start_date=update_data.actual_start_date,
+            actual_end_date=update_data.actual_end_date,
+            notes=update_data.notes
+        )
+        
+        # Calculate variance
+        variance_days = None
+        variance_status = "on_track"
+        
+        if updated_timeline.actual_end_date and updated_timeline.planned_end_date:
+            variance_days = (updated_timeline.actual_end_date - updated_timeline.planned_end_date).days
+            if variance_days > 0:
+                variance_status = "delayed"
+            elif variance_days < 0:
+                variance_status = "ahead"
+        
+        return TimelinePhaseUpdateResponse(
+            id=updated_timeline.id,
+            phase_name=updated_timeline.phase_name,
+            planned_start_date=updated_timeline.planned_start_date,
+            planned_end_date=updated_timeline.planned_end_date,
+            actual_start_date=updated_timeline.actual_start_date,
+            actual_end_date=updated_timeline.actual_end_date,
+            variance_days=variance_days,
+            variance_status=variance_status,
+            notes=update_data.notes
+        )
+        
+    except ValueError as e:
+        logger.warning(f"Invalid data for timeline update: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error updating timeline actual dates: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update timeline actual dates: {str(e)}"
+        )
+
+
+@router.get("/projects/{project_id}/variance-analysis")
+async def get_project_timeline_variance_analysis(
+    project_id: UUID,
+    request: Request,
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Get detailed variance analysis for all timeline phases in a project.
+    """
+    auth_context = require_auth(request)
+    
+    try:
+        timeline_service = TimelineTrackingService(db_session)
+        
+        # Get all timeline phases for the project
+        project_timeline = await timeline_service.get_project_timeline(project_id)
+        
+        variance_analysis = []
+        total_variance_days = 0
+        phases_with_variance = 0
+        
+        for phase in project_timeline:
+            phase_analysis = {
+                "timeline_id": phase.id,
+                "phase_name": phase.phase_name,
+                "planned_start_date": phase.planned_start_date,
+                "planned_end_date": phase.planned_end_date,
+                "actual_start_date": phase.actual_start_date,
+                "actual_end_date": phase.actual_end_date,
+                "variance_days": None,
+                "variance_status": "pending"
+            }
+            
+            # Calculate variance if actual dates are available
+            if phase.actual_end_date and phase.planned_end_date:
+                variance_days = (phase.actual_end_date - phase.planned_end_date).days
+                phase_analysis["variance_days"] = variance_days
+                
+                if variance_days > 0:
+                    phase_analysis["variance_status"] = "delayed"
+                    total_variance_days += variance_days
+                    phases_with_variance += 1
+                elif variance_days < 0:
+                    phase_analysis["variance_status"] = "ahead"
+                    total_variance_days += variance_days
+                    phases_with_variance += 1
+                else:
+                    phase_analysis["variance_status"] = "on_track"
+            
+            variance_analysis.append(phase_analysis)
+        
+        # Overall project variance summary
+        summary = {
+            "total_phases": len(project_timeline),
+            "completed_phases": len([p for p in project_timeline if p.actual_end_date]),
+            "average_variance_days": total_variance_days / phases_with_variance if phases_with_variance > 0 else 0,
+            "project_status": "on_track" if total_variance_days <= 0 else "delayed"
+        }
+        
+        return {
+            "project_id": project_id,
+            "variance_analysis": variance_analysis,
+            "summary": summary,
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating variance analysis: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate variance analysis: {str(e)}"
+        )
+
+
+@router.get("/projects/{project_id}/timeline/health", response_model=Dict[str, Any])
+async def get_timeline_health(
+    project_id: UUID,
+    request: Request,
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Get timeline health metrics and status.
+    """
+    auth_context = require_auth(request)
+    
+    try:
+        timeline_service = TimelineTrackingService(db_session)
+        
+        # Get timeline variance data
+        variance_data = await timeline_service.get_timeline_variance(project_id)
+        
+        # Calculate health metrics
+        total_phases = len(variance_data.get("phases", []))
+        delayed_phases = len([p for p in variance_data.get("phases", []) if p.get("is_delayed", False)])
+        on_time_phases = total_phases - delayed_phases
+        
+        health_score = (on_time_phases / total_phases * 100) if total_phases > 0 else 100
+        
+        health_status = "healthy" if health_score >= 80 else "warning" if health_score >= 60 else "critical"
+        
+        return {
+            "project_id": project_id,
+            "health_score": round(health_score, 2),
+            "health_status": health_status,
+            "total_phases": total_phases,
+            "delayed_phases": delayed_phases,
+            "on_time_phases": on_time_phases,
+            "average_variance_days": variance_data.get("average_variance_days", 0),
+            "max_variance_days": variance_data.get("max_variance_days", 0),
+            "variance_breakdown": variance_data.get("variance_breakdown", {}),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching timeline health: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch timeline health: {str(e)}",
         ) 

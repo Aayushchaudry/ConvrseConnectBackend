@@ -647,4 +647,78 @@ class TimelineTrackingService:
         )
         
         latest_completion = result.scalar()
-        return float(latest_completion) if latest_completion is not None else 0.0 
+        return float(latest_completion) if latest_completion is not None else 0.0
+
+    async def update_timeline_actual_dates(
+        self,
+        timeline_id: UUID,
+        actual_start_date: Optional[date] = None,
+        actual_end_date: Optional[date] = None,
+        notes: Optional[str] = None,
+    ) -> ProjectTimeline:
+        """
+        Update actual start and end dates for a timeline phase.
+        
+        Args:
+            timeline_id: ID of the timeline phase to update
+            actual_start_date: New actual start date
+            actual_end_date: New actual end date
+            notes: Optional notes about the update
+            
+        Returns:
+            ProjectTimeline: Updated timeline phase
+            
+        Raises:
+            ValueError: If timeline not found or invalid date logic
+        """
+        logger.info(f"Updating actual dates for timeline {timeline_id}")
+        
+        # Get the timeline phase
+        timeline = await self._get_timeline_by_id(timeline_id)
+        if not timeline:
+            raise ValueError(f"Timeline phase with ID {timeline_id} not found")
+        
+        # Validate date logic
+        if actual_start_date and actual_end_date:
+            if actual_start_date > actual_end_date:
+                raise ValueError("Actual start date cannot be after actual end date")
+        
+        if actual_start_date and timeline.planned_start_date:
+            if actual_start_date < timeline.planned_start_date:
+                logger.warning(f"Actual start date {actual_start_date} is before planned start date {timeline.planned_start_date}")
+        
+        # Update the timeline
+        if actual_start_date is not None:
+            timeline.actual_start_date = actual_start_date
+        if actual_end_date is not None:
+            timeline.actual_end_date = actual_end_date
+        
+        # Update timestamp
+        timeline.updated_at = datetime.utcnow()
+        
+        # Commit changes
+        await self.db_session.commit()
+        await self.db_session.refresh(timeline)
+        
+        logger.info(f"Updated timeline {timeline_id} with actual dates: start={actual_start_date}, end={actual_end_date}")
+        return timeline
+
+    async def _get_timeline_by_id(self, timeline_id: UUID) -> Optional[ProjectTimeline]:
+        """Get timeline phase by ID."""
+        result = await self.db_session.execute(
+            select(ProjectTimeline).filter(ProjectTimeline.id == timeline_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_project_timeline(self, project_id: UUID) -> List[ProjectTimeline]:
+        """Get all timeline phases for a project."""
+        try:
+            result = await self.db_session.execute(
+                select(ProjectTimeline)
+                .filter(ProjectTimeline.project_id == project_id)
+                .order_by(ProjectTimeline.planned_start_date)
+            )
+            return result.scalars().all()
+        except Exception as e:
+            logger.error(f"Error fetching project timeline for {project_id}: {e}")
+            raise 

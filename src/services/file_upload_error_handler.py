@@ -93,7 +93,7 @@ class RetryResult(BaseModel):
     success: bool
     attempt_number: int
     total_attempts: int
-    final_error: Optional[FileUploadError] = None
+    final_error: Optional[Dict[str, Any]] = None  # Changed from FileUploadError to serializable dict
     result_data: Optional[Dict[str, Any]] = None
     retry_history: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -342,7 +342,7 @@ class FileUploadErrorHandler:
             success=False,
             attempt_number=retry_config.max_attempts,
             total_attempts=retry_config.max_attempts,
-            final_error=last_error,
+            final_error=last_error.to_dict() if last_error else None,  # Convert to dict for serialization
             retry_history=retry_history
         )
     

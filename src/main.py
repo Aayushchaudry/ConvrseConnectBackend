@@ -229,6 +229,8 @@ app.add_middleware(
         "/api/projects",      # Legacy without trailing slash
         "/api/v1/timeline/projects/",  # Temporarily bypass auth for timeline testing
         "/api/v1/timeline/projects",   # Also without trailing slash
+        "/api/v1/timeline/",  # Bypass auth for timeline actual dates endpoints
+        "/api/v1/timeline",   # Also without trailing slash
     ],
 )
 

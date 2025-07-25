@@ -9,7 +9,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db_session, get_event_bus
+from src.config.database import get_db_session
+from src.config.event_bus import get_event_bus
 from src.events.event_bus_interface import EventBus
 from src.models.project_output import ProjectOutput
 from src.schemas.project_output import (
