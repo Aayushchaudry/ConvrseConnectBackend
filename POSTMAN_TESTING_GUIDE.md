@@ -1,253 +1,242 @@
-# ConvrseConnect - Project Timeline Flow Testing Guide
+# ConvrseConnect Backend API Testing Guide
 
 ## Overview
-This guide walks you through testing the complete project timeline orchestration flow using the provided Postman collection.
 
-## Prerequisites
+This Postman collection provides comprehensive testing for the ConvrseConnect Backend system, including integrations with Auth Service and Platform Service. The collection covers all implemented features from your file-upload-review-integration specification.
 
-### 1. Server Setup
+## Setup Instructions
+
+### 1. Import Collection and Environment
+
+1. Import `ConvrseConnect_API_Collection.postman_collection.json` into Postman
+2. Import `ConvrseConnect_Environment.postman_environment.json` as an environment
+3. Select the "ConvrseConnect Development" environment
+
+### 2. Configure Service URLs
+
+Update the environment variables if your services run on different ports:
+
+- `base_url`: ConvrseConnect Backend (default: http://localhost:8000)
+- `auth_service_url`: Auth Service (default: http://localhost:8001)
+- `platform_service_url`: Platform Service (default: http://localhost:8002)
+
+### 3. Start Your Services
+
+Ensure all three services are running:
 ```bash
-# Ensure your backend server is running
+# ConvrseConnect Backend
 cd ConvrseConnectBackend
-python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.main:app --reload --port 8000
+
+# Auth Service (separate terminal)
+cd auth-service
+uvicorn main:app --reload --port 8001
+
+# Platform Service (separate terminal)
+cd platform-service
+uvicorn main:app --reload --port 8002
 ```
 
-### 2. Database Setup
-- Ensure PostgreSQL is running
-- Database migrations are applied
-- Event bus is configured (SQS mock or real SQS)
+## Testing Workflow
 
-### 3. Import Postman Collection
-1. Open Postman
-2. Click "Import" 
-3. Select `Postman_Collection_Timeline_Flow.json`
-4. Collection will be imported with environment variables
+### Phase 1: Service Health Checks
 
-## Testing Flow
+1. **🏥 Health Checks** folder
+   - Run all health check requests to verify services are running
+   - Verify auth service connectivity
+   - Check platform service availability
 
-### Step 1: Health Check
-**Request:** `GET /health`
-- **Purpose:** Verify server is running
-- **Expected Response:** `200 OK` with health status
-- **What to Check:** Server connectivity and basic functionality
+### Phase 2: Authentication Setup
 
-### Step 2: Create Project with Deliverables
-**Request:** `POST /api/projects/`
-```json
-{
-  "name": "Test Project - Mixed Interior/Exterior",
-  "budget": 25000,
-  "start_date": "2024-01-01",
-  "end_date": "2024-06-01",
-  "deliverable_types": ["rendered_images", "vr_tour", "technical_renders"],
-  "deliverable_sub_types": {
-    "rendered_images": "exterior",
-    "vr_tour": "interior", 
-    "technical_renders": "exterior"
-  },
-  "deliverable_timeline_days": {
-    "rendered_images": 14,
-    "vr_tour": 21,
-    "technical_renders": 10
-  }
-}
-```
+1. **🔐 Authentication** folder
+   - Register a new user (if needed)
+   - Login to get authentication token
+   - Token is automatically stored in `auth_token` variable
+   - Validate token to ensure it's working
 
-**Expected Orchestration Flow:**
-1. ✅ Project created in database
-2. ✅ `ProjectCreatedEvent` published
-3. ✅ `EnhancedProjectOrchestrator` receives event
-4. ✅ Auto-creates 3 deliverables from `deliverable_types`
-5. ✅ Groups deliverables by interior/exterior
-6. ✅ Creates 2 separate timelines (interior + exterior)
-7. ✅ Creates tasks for each timeline phase
-8. ✅ Links tasks to deliverables and phases
+### Phase 3: Core Project Workflow
 
-**What to Check:**
-- Response has project ID (auto-saved to collection variable)
-- Status: `201 Created`
-- Project details match input
+Follow this sequence to test the complete project lifecycle:
 
-### Step 3: Verify Auto-Created Deliverables
-**Request:** `GET /api/projects/{project_id}/deliverables/`
+#### 3.1 Project Creation
+1. **📁 Projects Management** → "Create Project"
+   - Creates a new project and stores `project_id`
 
-**Expected Results:**
-- **3 deliverables** auto-created:
-  1. `rendered_images` (exterior) - 14 days
-  2. `vr_tour` (interior) - 21 days  
-  3. `technical_renders` (exterior) - 10 days
-- Each has correct `deliverable_sub_type`
-- Each has correct `tentative_timeline_days`
+#### 3.2 Deliverable Setup
+2. **📋 Deliverables Management** → "Create Deliverable"
+   - Creates a deliverable for the project
+   - Stores `deliverable_id`
 
-### Step 4: Check Timeline Creation
-**Request:** `GET /api/projects/{project_id}/timeline`
+#### 3.3 Requirements with File Upload
+3. **📄 Requirements Management**:
+   - "Create Requirement" → stores `requirement_id`
+   - "Upload Requirement Files" → test file upload integration
+   - "Get Requirement Files" → verify files were uploaded
 
-**Expected Timeline Structure:**
+#### 3.4 Task Management and Completion
+4. **🔧 Internal Tasks Management**:
+   - "Create Internal Task" → stores `task_id`
+   - "Complete Task with Files" → creates review items, stores `review_item_id`
 
-**Interior Timeline (for vr_tour):**
-1. Kick-off Meeting (1 day)
-2. Theme Approval (3 days)
-3. Modeling & Texturing (7 days)
-4. Lighting (3 days)
-5. Deliverables Completion (21 days - max from interior deliverables)
+#### 3.5 Review Process
+5. **👁️ Review Items Management**:
+   - "Get Review Item Files" → stores `file_id`
+   - "Submit Review Feedback - Request Changes" → test rejection workflow
+   - "Submit Review Feedback - Approve" → test approval workflow
+   - "Get Review Feedback History" → verify feedback tracking
 
-**Exterior Timeline (for rendered_images + technical_renders):**
-1. Kick-off Meeting (1 day)
-2. Modeling (7 days)
-3. Texturing & Landscaping (8 days)
-4. Lighting (3 days)
-5. Deliverables Completion (14 days - max from exterior deliverables)
+### Phase 4: Advanced Features Testing
 
-### Step 5: Verify Task Creation
-**Request:** `GET /api/projects/{project_id}/tasks`
+#### 4.1 Project Outputs
+6. **📊 Project Outputs**:
+   - Test output generation
+   - Project compilation
+   - Deliverable output creation
 
-**Expected Task Structure:**
-- **Interior Tasks:** Created for vr_tour deliverable
-- **Exterior Tasks:** Created for rendered_images + technical_renders
-- Tasks should be linked to timeline phases
-- Dependencies between tasks based on phase order
+#### 4.2 Pricing Management
+7. **💰 Pricing Management**:
+   - Set and update pricing
+   - Get budget summaries
+   - Track actual costs
 
-### Step 6: Test Manual Deliverable Creation
-**Request:** `POST /api/projects/{project_id}/deliverables/`
-```json
-{
-  "deliverable_type": "video_walkthrough",
-  "deliverable_sub_type": "interior",
-  "tentative_timeline_days": 18
-}
-```
+#### 4.3 Timeline Tracking
+8. **📅 Timeline Management**:
+   - Log task progress
+   - Track project timelines
+   - Create milestones
 
-**Expected Results:**
-- New deliverable created
-- Should not automatically create new timeline (existing interior timeline should accommodate it)
+#### 4.4 Task Dependencies
+9. **🎯 Task Management**:
+   - Test task dependencies
+   - Resource allocation
+   - Critical path analysis
 
-## What to Monitor in Logs
+### Phase 5: Platform Service Integration
 
-### 1. Project Creation Logs
-```
-✅ ProjectService - Project created in database: {project_id}
-✅ ProjectService - ProjectCreatedEvent published successfully
-```
+10. **📁 Platform Service Integration**:
+    - Direct file upload to platform service
+    - File metadata retrieval
+    - File download and viewing
 
-### 2. Orchestration Logs
-```
-🔄 Enhanced auto-generation for project {project_id}
-🔄 Auto-creating 3 deliverables for project {project_id}
-✅ Created deliverable: {id} (rendered_images)
-✅ Created deliverable: {id} (vr_tour)  
-✅ Created deliverable: {id} (technical_renders)
-```
+### Phase 6: Debug and Monitoring
 
-### 3. Timeline Creation Logs
-```
-✅ Creating interior timeline milestones for project {project_id}
-✅ Creating exterior timeline milestones for project {project_id}
-✅ Created {count} timeline milestones for project {project_id}
-```
+11. **🔧 Debug & Testing**:
+    - Test event bus functionality
+    - Debug workflows
+    - Service integration testing
 
-### 4. Task Creation Logs
-```
-✅ Creating task 'Project Kick-off Meeting' of type 'meeting'
-✅ Creating task 'Create 3D Model - {deliverable}' of type 'modeling'
-✅ Created task with ID: {task_id}
-```
+## Key Integration Points to Test
 
-## Common Issues & Troubleshooting
+### 1. File Upload Integration
+- **Requirement Files**: Upload files through requirements API
+- **Review Item Files**: Complete tasks with file attachments
+- **Platform Service**: Direct file operations
 
-### Issue 1: Project Created but No Deliverables
-**Symptoms:** Project exists but deliverables list is empty
-**Cause:** Orchestrator not receiving/processing ProjectCreatedEvent
-**Check:** 
-- Event bus configuration
-- SQS mock service running
-- Orchestrator event handlers registered
+### 2. Review Workflow Integration
+- **Task Completion**: Files automatically create review items
+- **Feedback Processing**: Approval/rejection creates appropriate workflows
+- **Rework Tasks**: Rejected items generate new tasks
 
-### Issue 2: Deliverables Created but No Timeline
-**Symptoms:** Deliverables exist but timeline is empty
-**Check:**
-- Timeline service imports and dependencies
-- ProjectTimeline model accessibility
-- Database permissions for timeline table
+### 3. Service Communication
+- **Auth Service**: Token validation and user management
+- **Platform Service**: File storage and retrieval
+- **Event Bus**: Cross-service communication
 
-### Issue 3: Timeline Created but No Tasks
-**Symptoms:** Timeline exists but no tasks created
-**Check:**
-- TaskManagementService.create_task() method
-- InternalTask model and relationships
-- Task creation dependencies
+### 4. Data Flow Validation
+- **Project → Deliverable → Task → Review Item → Output**
+- **File Upload → Review → Feedback → Rework/Approval**
+- **Timeline → Progress → Milestones**
 
-### Issue 4: Mixed Interior/Exterior Not Separating
-**Symptoms:** Only one timeline created instead of two
-**Check:**
-- Deliverable sub_type classification logic
-- Interior/exterior grouping in orchestrator
+## Testing Scenarios
 
-## Advanced Testing Scenarios
+### Scenario 1: Complete Project Lifecycle
+1. Create project and deliverable
+2. Add requirements with files
+3. Create and complete tasks with files
+4. Review and approve all items
+5. Generate final outputs
 
-### Scenario 1: Pure Interior Project
-```json
-{
-  "deliverable_types": ["vr_tour", "video_walkthrough"],
-  "deliverable_sub_types": {
-    "vr_tour": "interior",
-    "video_walkthrough": "interior"
-  }
-}
-```
-**Expected:** Only interior timeline created
+### Scenario 2: Rework Workflow
+1. Complete task with files
+2. Submit rejection feedback
+3. Verify rework task creation
+4. Complete rework task
+5. Approve revised work
 
-### Scenario 2: Pure Exterior Project  
-```json
-{
-  "deliverable_types": ["rendered_images", "technical_renders"],
-  "deliverable_sub_types": {
-    "rendered_images": "exterior", 
-    "technical_renders": "exterior"
-  }
-}
-```
-**Expected:** Only exterior timeline created
+### Scenario 3: File Version Management
+1. Upload initial files
+2. Request changes with feedback
+3. Upload new file versions
+4. Track version history
 
-### Scenario 3: Large Mixed Project
-```json
-{
-  "deliverable_types": ["rendered_images", "vr_tour", "technical_renders", "video_walkthrough", "location_map"],
-  "deliverable_sub_types": {
-    "rendered_images": "exterior",
-    "vr_tour": "interior",
-    "technical_renders": "exterior", 
-    "video_walkthrough": "interior",
-    "location_map": "exterior"
-  }
-}
-```
-**Expected:** Both timelines with multiple deliverables in each
+### Scenario 4: Cross-Service Integration
+1. Upload files to platform service
+2. Reference files in backend operations
+3. Verify file accessibility across services
 
-## Success Criteria
+## Troubleshooting
 
-✅ **Project Creation:** Project created with all metadata  
-✅ **Auto-Deliverable Creation:** All deliverable_types become actual deliverables  
-✅ **Timeline Separation:** Interior and exterior get separate timelines  
-✅ **Phase Structure:** Correct phases for each timeline type  
-✅ **Task Generation:** Tasks created for each phase  
-✅ **Task-Deliverable Linking:** Tasks properly linked to deliverables  
-✅ **Dependencies:** Task dependencies respect phase order  
-✅ **Event Flow:** All events properly published and handled  
+### Common Issues
 
-## API Reference
+1. **Authentication Failures**
+   - Verify auth service is running
+   - Check token expiration
+   - Ensure proper login credentials
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/health` | GET | Server health check |
-| `/api/projects/` | POST | Create project with auto-deliverables |
-| `/api/projects/{id}` | GET | Get project details |
-| `/api/projects/{id}/deliverables/` | GET | List project deliverables |
-| `/api/projects/{id}/timeline` | GET | Get project timeline |
-| `/api/projects/{id}/tasks` | GET | Get project tasks |
-| `/api/projects/{id}/deliverables/` | POST | Create additional deliverable |
-| `/api/deliverables/{id}/status` | PATCH | Update deliverable status |
-| `/api/internal-tasks/` | POST | Create manual task |
+2. **File Upload Issues**
+   - Verify platform service connectivity
+   - Check file size limits
+   - Ensure proper file formats
 
----
+3. **Service Communication**
+   - Check service URLs in environment
+   - Verify network connectivity
+   - Review service logs for errors
 
-**Note:** This testing flow validates the complete end-to-end orchestration from project creation through timeline and task generation. Monitor logs closely to understand the internal flow and catch any issues early. 
+### Debug Endpoints
+
+Use the **🔧 Debug & Testing** folder for:
+- Event bus testing
+- Service integration debugging
+- Workflow troubleshooting
+
+## Expected Response Codes
+
+- **200**: Successful GET requests
+- **201**: Successful POST requests (creation)
+- **204**: Successful DELETE requests
+- **400**: Bad request (validation errors)
+- **401**: Authentication required
+- **403**: Insufficient permissions
+- **404**: Resource not found
+- **500**: Internal server error
+
+## File Upload Testing
+
+For file upload endpoints, you'll need to:
+1. Select files in the form-data body
+2. Use appropriate file types (images, documents, 3D models)
+3. Verify files are properly stored and referenced
+
+## Monitoring and Validation
+
+After running tests, verify:
+1. Database records are created correctly
+2. Files are stored in platform service
+3. Event bus messages are processed
+4. Timeline and pricing data is accurate
+5. Review workflows function properly
+
+## Collection Variables
+
+The collection automatically manages these variables:
+- `auth_token`: Authentication token from login
+- `project_id`: Created project identifier
+- `deliverable_id`: Created deliverable identifier
+- `requirement_id`: Created requirement identifier
+- `task_id`: Created task identifier
+- `review_item_id`: Created review item identifier
+- `file_id`: Uploaded file identifier
+- `platform_file_id`: Platform service file identifier
+
+These variables are automatically set by test scripts in the requests, enabling seamless workflow testing.

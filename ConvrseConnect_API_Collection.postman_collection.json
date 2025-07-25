@@ -1,0 +1,1392 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		"name": "ConvrseConnect Backend API Collection",
+		"description": "Comprehensive API collection for testing ConvrseConnect Backend with Auth Service and Platform Service integrations",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{auth_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "auth_service_url",
+			"value": "http://localhost:8001",
+			"type": "string"
+		},
+		{
+			"key": "platform_service_url",
+			"value": "http://localhost:8002",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "project_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "deliverable_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "requirement_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "task_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "review_item_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "file_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "🔐 Authentication",
+			"item": [
+				{
+					"name": "Health Check - Auth Service",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{auth_service_url}}/health",
+							"host": ["{{auth_service_url}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('auth_token', response.access_token);",
+									"    console.log('Auth token set:', response.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"test@example.com\",\n    \"password\": \"testpassword123\"\n}"
+						},
+						"url": {
+							"raw": "{{auth_service_url}}/auth/login",
+							"host": ["{{auth_service_url}}"],
+							"path": ["auth", "login"]
+						}
+					}
+				},
+				{
+					"name": "Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"test@example.com\",\n    \"password\": \"testpassword123\",\n    \"full_name\": \"Test User\",\n    \"role\": \"client\"\n}"
+						},
+						"url": {
+							"raw": "{{auth_service_url}}/auth/register",
+							"host": ["{{auth_service_url}}"],
+							"path": ["auth", "register"]
+						}
+					}
+				},
+				{
+					"name": "Validate Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"token\": \"{{auth_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{auth_service_url}}/auth/validate",
+							"host": ["{{auth_service_url}}"],
+							"path": ["auth", "validate"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🏥 Health Checks",
+			"item": [
+				{
+					"name": "Backend Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "Platform Service Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{platform_service_url}}/health",
+							"host": ["{{platform_service_url}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "Backend API Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/health",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "health"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📁 Projects Management",
+			"item": [
+				{
+					"name": "Create Project",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('project_id', response.id);",
+									"    console.log('Project ID set:', response.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Test Project\",\n    \"description\": \"A test project for API testing\",\n    \"client_id\": \"test-client-123\",\n    \"project_type\": \"3d_modeling\",\n    \"budget\": 5000.00,\n    \"timeline_weeks\": 4\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects"]
+						}
+					}
+				},
+				{
+					"name": "Get All Projects",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects"]
+						}
+					}
+				},
+				{
+					"name": "Get Project by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects/{{project_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects", "{{project_id}}"]
+						}
+					}
+				},
+				{
+					"name": "Update Project",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Updated Test Project\",\n    \"description\": \"Updated description for testing\",\n    \"budget\": 6000.00\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects/{{project_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects", "{{project_id}}"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📋 Deliverables Management",
+			"item": [
+				{
+					"name": "Create Deliverable",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('deliverable_id', response.id);",
+									"    console.log('Deliverable ID set:', response.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"project_id\": \"{{project_id}}\",\n    \"name\": \"3D Model Deliverable\",\n    \"description\": \"Main 3D model for the project\",\n    \"deliverable_type\": \"3d_model\",\n    \"estimated_hours\": 40,\n    \"due_date\": \"2025-02-15T10:00:00Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/deliverables",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "deliverables"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Deliverables",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects/{{project_id}}/deliverables",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects", "{{project_id}}", "deliverables"]
+						}
+					}
+				},
+				{
+					"name": "Get Deliverable by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/deliverables/{{deliverable_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "deliverables", "{{deliverable_id}}"]
+						}
+					}
+				},
+				{
+					"name": "Update Deliverable Status",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"status\": \"in_progress\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/deliverables/{{deliverable_id}}/status",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "deliverables", "{{deliverable_id}}", "status"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📄 Requirements Management",
+			"item": [
+				{
+					"name": "Create Requirement",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('requirement_id', response.id);",
+									"    console.log('Requirement ID set:', response.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"project_id\": \"{{project_id}}\",\n    \"title\": \"3D Model Specifications\",\n    \"description\": \"Detailed specifications for the 3D model\",\n    \"priority\": \"high\",\n    \"category\": \"technical\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/requirements",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "requirements"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Requirements",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects/{{project_id}}/requirements",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects", "{{project_id}}", "requirements"]
+						}
+					}
+				},
+				{
+					"name": "Upload Requirement Files",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "files",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "description",
+									"value": "Reference images and specifications",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/requirements/{{requirement_id}}/files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "requirements", "{{requirement_id}}", "files"]
+						}
+					}
+				},
+				{
+					"name": "Get Requirement Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/requirements/{{requirement_id}}/files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "requirements", "{{requirement_id}}", "files"]
+						}
+					}
+				}
+			]
+		}		,
+
+		{
+			"name": "🔧 Internal Tasks Management",
+			"item": [
+				{
+					"name": "Create Internal Task",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('task_id', response.id);",
+									"    console.log('Task ID set:', response.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"deliverable_id\": \"{{deliverable_id}}\",\n    \"title\": \"Create 3D Model Base\",\n    \"description\": \"Create the base structure of the 3D model\",\n    \"task_type\": \"modeling\",\n    \"estimated_hours\": 8,\n    \"assigned_to\": \"designer-123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/internal-tasks",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "internal-tasks"]
+						}
+					}
+				},
+				{
+					"name": "Get Deliverable Tasks",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/deliverables/{{deliverable_id}}/tasks",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "deliverables", "{{deliverable_id}}", "tasks"]
+						}
+					}
+				},
+				{
+					"name": "Complete Task with Files",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.review_items && response.review_items.length > 0) {",
+									"        pm.collectionVariables.set('review_item_id', response.review_items[0].id);",
+									"        console.log('Review Item ID set:', response.review_items[0].id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "files",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "completion_notes",
+									"value": "Task completed successfully. 3D model base created as per specifications.",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/internal-tasks/{{task_id}}/complete-with-files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "internal-tasks", "{{task_id}}", "complete-with-files"]
+						}
+					}
+				},
+				{
+					"name": "Update Task Status",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"status\": \"in_progress\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/internal-tasks/{{task_id}}/status",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "internal-tasks", "{{task_id}}", "status"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "👁️ Review Items Management",
+			"item": [
+				{
+					"name": "Get Review Item Files",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.length > 0) {",
+									"        pm.collectionVariables.set('file_id', response[0].id);",
+									"        console.log('File ID set:', response[0].id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/review-items/{{review_item_id}}/files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "review-items", "{{review_item_id}}", "files"]
+						}
+					}
+				},
+				{
+					"name": "Submit Review Feedback - Approve",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"feedback_type\": \"approval\",\n    \"comments\": \"Great work! The 3D model looks perfect.\",\n    \"reviewer_id\": \"client-123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						}
+					}
+				},
+				{
+					"name": "Submit Review Feedback - Request Changes",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"feedback_type\": \"revision_required\",\n    \"comments\": \"Please adjust the lighting and add more detail to the texture.\",\n    \"reviewer_id\": \"client-123\",\n    \"coordinate_x\": 150.5,\n    \"coordinate_y\": 200.3,\n    \"coordinate_z\": 75.8\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						}
+					}
+				},
+				{
+					"name": "Get Review Feedback History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						}
+					}
+				},
+				{
+					"name": "Update Review Item Status",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"status\": \"approved\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/review-items/{{review_item_id}}/status",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "review-items", "{{review_item_id}}", "status"]
+						}
+					}
+				},
+				{
+					"name": "Update File Version",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"version_notes\": \"Updated based on client feedback - improved lighting and textures\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/review-items/{{review_item_id}}/files/{{file_id}}/version",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "review-items", "{{review_item_id}}", "files", "{{file_id}}", "version"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📊 Project Outputs",
+			"item": [
+				{
+					"name": "Create Project Output",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"project_id\": \"{{project_id}}\",\n    \"deliverable_id\": \"{{deliverable_id}}\",\n    \"output_type\": \"final_model\",\n    \"title\": \"Final 3D Model\",\n    \"description\": \"Complete 3D model ready for delivery\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/project-outputs",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "project-outputs"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Outputs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects/{{project_id}}/outputs",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects", "{{project_id}}", "outputs"]
+						}
+					}
+				},
+				{
+					"name": "Get Deliverable Outputs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/deliverables/{{deliverable_id}}/outputs",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "deliverables", "{{deliverable_id}}", "outputs"]
+						}
+					}
+				},
+				{
+					"name": "Compile Project",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"include_source_files\": true,\n    \"output_format\": \"zip\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/projects/{{project_id}}/compile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "projects", "{{project_id}}", "compile"]
+						}
+					}
+				},
+				{
+					"name": "Generate Deliverable Output",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"output_type\": \"final_render\",\n    \"format\": \"high_res\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/deliverables/{{deliverable_id}}/generate-output",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "deliverables", "{{deliverable_id}}", "generate-output"]
+						}
+					}
+				},
+				{
+					"name": "Check Pending Outputs",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/check-pending-outputs",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "check-pending-outputs"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "💰 Pricing Management",
+			"item": [
+				{
+					"name": "Set Deliverable Pricing",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"deliverable_id\": \"{{deliverable_id}}\",\n    \"base_price\": 2500.00,\n    \"hourly_rate\": 75.00,\n    \"estimated_hours\": 40,\n    \"complexity_multiplier\": 1.2\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pricing/projects/{{project_id}}/pricing",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pricing", "projects", "{{project_id}}", "pricing"]
+						}
+					}
+				},
+				{
+					"name": "Update Deliverable Pricing",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"base_price\": 2800.00,\n    \"hourly_rate\": 80.00,\n    \"estimated_hours\": 45\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pricing/projects/{{project_id}}/deliverables/{{deliverable_id}}/pricing",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pricing", "projects", "{{project_id}}", "deliverables", "{{deliverable_id}}", "pricing"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Pricing",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/pricing/projects/{{project_id}}/pricing",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pricing", "projects", "{{project_id}}", "pricing"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Budget Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/pricing/projects/{{project_id}}/budget-summary",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pricing", "projects", "{{project_id}}", "budget-summary"]
+						}
+					}
+				},
+				{
+					"name": "Recalculate Project Budget",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"include_overhead\": true,\n    \"apply_discounts\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pricing/projects/{{project_id}}/calculate-budget",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pricing", "projects", "{{project_id}}", "calculate-budget"]
+						}
+					}
+				},
+				{
+					"name": "Get Cost Analysis",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/pricing/projects/{{project_id}}/cost-analysis",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pricing", "projects", "{{project_id}}", "cost-analysis"]
+						}
+					}
+				},
+				{
+					"name": "Track Actual Cost",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"deliverable_id\": \"{{deliverable_id}}\",\n    \"actual_hours\": 42,\n    \"additional_costs\": 150.00,\n    \"cost_category\": \"software_licensing\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pricing/projects/{{project_id}}/track-cost",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pricing", "projects", "{{project_id}}", "track-cost"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📅 Timeline Management",
+			"item": [
+				{
+					"name": "Log Task Progress",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"progress_percentage\": 75,\n    \"hours_worked\": 6,\n    \"notes\": \"Good progress on 3D model base structure\",\n    \"blockers\": []\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/tasks/{{task_id}}/progress",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "tasks", "{{task_id}}", "progress"]
+						}
+					}
+				},
+				{
+					"name": "Get Task Progress History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/tasks/{{task_id}}/progress",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "tasks", "{{task_id}}", "progress"]
+						}
+					}
+				},
+				{
+					"name": "Update Task Progress",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"progress_percentage\": 90,\n    \"hours_worked\": 8,\n    \"notes\": \"Nearly complete, final touches needed\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/tasks/{{task_id}}/progress/2025-01-24",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "tasks", "{{task_id}}", "progress", "2025-01-24"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Progress Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/projects/{{project_id}}/progress",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "projects", "{{project_id}}", "progress"]
+						}
+					}
+				},
+				{
+					"name": "Get Actual Timeline",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/projects/{{project_id}}/timeline/actual",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "projects", "{{project_id}}", "timeline", "actual"]
+						}
+					}
+				},
+				{
+					"name": "Get Planned Timeline",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/projects/{{project_id}}/timeline/planned",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "projects", "{{project_id}}", "timeline", "planned"]
+						}
+					}
+				},
+				{
+					"name": "Get Timeline Comparison",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/projects/{{project_id}}/timeline/comparison",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "projects", "{{project_id}}", "timeline", "comparison"]
+						}
+					}
+				},
+				{
+					"name": "Create Project Milestone",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"milestone_name\": \"3D Model Review Complete\",\n    \"milestone_date\": \"2025-02-10T10:00:00Z\",\n    \"description\": \"All 3D model reviews completed and approved\",\n    \"milestone_type\": \"review_completion\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/projects/{{project_id}}/milestones",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "projects", "{{project_id}}", "milestones"]
+						}
+					}
+				},
+				{
+					"name": "Get Upcoming Milestones",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/timeline/projects/{{project_id}}/milestones/upcoming",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "timeline", "projects", "{{project_id}}", "milestones", "upcoming"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🎯 Task Management",
+			"item": [
+				{
+					"name": "Get Task Dependencies",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/task-management/tasks/{{task_id}}/dependencies",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "task-management", "tasks", "{{task_id}}", "dependencies"]
+						}
+					}
+				},
+				{
+					"name": "Add Task Dependency",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"depends_on_task_id\": \"{{task_id}}\",\n    \"dependency_type\": \"finish_to_start\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/task-management/tasks/{{task_id}}/dependencies",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "task-management", "tasks", "{{task_id}}", "dependencies"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Task Hierarchy",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/task-management/projects/{{project_id}}/task-hierarchy",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "task-management", "projects", "{{project_id}}", "task-hierarchy"]
+						}
+					}
+				},
+				{
+					"name": "Get Critical Path",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/task-management/projects/{{project_id}}/critical-path",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "task-management", "projects", "{{project_id}}", "critical-path"]
+						}
+					}
+				},
+				{
+					"name": "Get Resource Allocation",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/task-management/projects/{{project_id}}/resource-allocation",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "task-management", "projects", "{{project_id}}", "resource-allocation"]
+						}
+					}
+				},
+				{
+					"name": "Update Resource Allocation",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"task_id\": \"{{task_id}}\",\n    \"resource_id\": \"designer-456\",\n    \"allocation_percentage\": 80,\n    \"start_date\": \"2025-01-25T09:00:00Z\",\n    \"end_date\": \"2025-01-30T17:00:00Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/task-management/projects/{{project_id}}/resource-allocation",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "task-management", "projects", "{{project_id}}", "resource-allocation"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📈 Dashboard & Analytics",
+			"item": [
+				{
+					"name": "Get Dashboard Overview",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/dashboard/overview",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "dashboard", "overview"]
+						}
+					}
+				},
+				{
+					"name": "Get Project Analytics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/dashboard/projects/{{project_id}}/analytics",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "dashboard", "projects", "{{project_id}}", "analytics"]
+						}
+					}
+				},
+				{
+					"name": "Get Performance Metrics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/dashboard/performance-metrics",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "dashboard", "performance-metrics"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📁 Platform Service Integration",
+			"item": [
+				{
+					"name": "Platform Service Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{platform_service_url}}/health",
+							"host": ["{{platform_service_url}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "Upload File to Platform Service",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('platform_file_id', response.file_id);",
+									"    console.log('Platform File ID set:', response.file_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "metadata",
+									"value": "{\"project_id\": \"{{project_id}}\", \"context\": \"requirement\"}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{platform_service_url}}/api/v1/files/upload",
+							"host": ["{{platform_service_url}}"],
+							"path": ["api", "v1", "files", "upload"]
+						}
+					}
+				},
+				{
+					"name": "Get File Metadata",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{platform_service_url}}/api/v1/files/{{platform_file_id}}/metadata",
+							"host": ["{{platform_service_url}}"],
+							"path": ["api", "v1", "files", "{{platform_file_id}}", "metadata"]
+						}
+					}
+				},
+				{
+					"name": "Download File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{platform_service_url}}/api/v1/files/{{platform_file_id}}/download",
+							"host": ["{{platform_service_url}}"],
+							"path": ["api", "v1", "files", "{{platform_file_id}}", "download"]
+						}
+					}
+				},
+				{
+					"name": "View File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{platform_service_url}}/api/v1/uploads/view/{{platform_file_id}}",
+							"host": ["{{platform_service_url}}"],
+							"path": ["api", "v1", "uploads", "view", "{{platform_file_id}}"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🔧 Debug & Testing",
+			"item": [
+				{
+					"name": "Trigger Info Gathering Debug",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"project_id\": \"{{project_id}}\",\n    \"trigger_type\": \"manual\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/debug/trigger-info-gathering/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "debug", "trigger-info-gathering", ""]
+						}
+					}
+				},
+				{
+					"name": "Submit Client Feedback Debug",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"project_id\": \"{{project_id}}\",\n    \"feedback\": \"Test feedback for debugging\",\n    \"client_id\": \"test-client-123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/debug/submit-client-feedback/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "debug", "submit-client-feedback", ""]
+						}
+					}
+				},
+				{
+					"name": "Test Event Bus",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/debug/test-event-bus",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "debug", "test-event-bus"]
+						}
+					}
+				},
+				{
+					"name": "Test Deliverable Service Event Bus",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/debug/test-deliverable-service-event-bus",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "debug", "test-deliverable-service-event-bus"]
+						}
+					}
+				}
+			]
+		}
+	]
+}

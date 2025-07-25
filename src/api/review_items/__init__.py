@@ -1,3 +1,1 @@
-"""
-Review Items API endpoints package.
-"""
+# src/api/review_items/__init__.py

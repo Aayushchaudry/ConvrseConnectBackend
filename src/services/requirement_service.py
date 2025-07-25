@@ -4,11 +4,13 @@ import logging
 from typing import List, Optional, Dict, Any, Set
 from uuid import UUID
 
+from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 
-from src.models.requirement import Requirement, RequirementType
+from src.models.requirement import Requirement, RequirementType, RequirementStatus
+from src.models.requirement_file import RequirementFile
 from src.models.requirement_template import RequirementTemplate
 from src.models.project import Project
 from src.models.deliverable import Deliverable
@@ -409,6 +411,242 @@ class RequirementService:
         templates = result.scalars().all()
         logger.info(f"Found {len(templates)} requirement templates")
         return templates
+
+    async def upload_requirement_files(
+        self,
+        requirement_id: UUID,
+        files: List[UploadFile],
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> List[RequirementFile]:
+        """
+        Upload files for a requirement with platform-service integration.
+        
+        Args:
+            requirement_id: ID of the requirement
+            files: List of files to upload
+            user_context: User context containing user_id and other auth info
+            
+        Returns:
+            List[RequirementFile]: Created requirement file records
+        """
+        logger.info(f"Uploading {len(files)} files for requirement {requirement_id}")
+
+        # Validate requirement exists and is of FILE_UPLOAD type
+        requirement = await self._get_requirement_by_id(requirement_id)
+        if not requirement:
+            raise ValueError(f"Requirement with ID {requirement_id} not found")
+        
+        if requirement.requirement_type != RequirementType.FILE_UPLOAD:
+            raise ValueError(f"Requirement {requirement_id} is not of type FILE_UPLOAD")
+
+        # Validate file types for requirement context
+        await self._validate_requirement_files(files)
+
+        # Use file upload integration service for platform-service integration
+        from src.services.file_upload_integration_service import (
+            FileUploadIntegrationService, 
+            RequirementFileMetadata
+        )
+        
+        file_upload_service = FileUploadIntegrationService(self.db_session)
+        
+        metadata = RequirementFileMetadata(
+            requirement_id=requirement_id,
+            uploaded_by=UUID(user_context.get('user_id')) if user_context and user_context.get('user_id') else None
+        )
+        
+        # Upload files and create records
+        upload_result = await file_upload_service.upload_requirement_files(
+            requirement_id, files, metadata
+        )
+        
+        # Update requirement status to RECEIVED
+        await self.update_requirement_status(requirement_id, RequirementStatus.RECEIVED, upload_result.platform_file_ids)
+        
+        # Get created requirement files
+        requirement_files = await self.get_requirement_files(requirement_id)
+        
+        logger.info(f"Successfully uploaded {len(files)} files for requirement {requirement_id}")
+        return requirement_files
+
+    async def update_requirement_status(
+        self,
+        requirement_id: UUID,
+        status: RequirementStatus,
+        file_ids: Optional[List[UUID]] = None
+    ) -> Requirement:
+        """
+        Update requirement status, typically when files are uploaded.
+        
+        Args:
+            requirement_id: ID of the requirement
+            status: New status
+            file_ids: Optional list of file IDs for reference
+            
+        Returns:
+            Requirement: Updated requirement
+        """
+        logger.info(f"Updating requirement {requirement_id} status to {status.value}")
+
+        requirement = await self._get_requirement_by_id(requirement_id)
+        if not requirement:
+            raise ValueError(f"Requirement with ID {requirement_id} not found")
+
+        requirement.status = status
+        
+        # Add note about file upload if files were provided
+        if file_ids and status == RequirementStatus.RECEIVED:
+            file_count = len(file_ids)
+            note = f"Status updated to RECEIVED - {file_count} file(s) uploaded"
+            if requirement.notes:
+                requirement.notes += f"\n{note}"
+            else:
+                requirement.notes = note
+
+        await self.db_session.commit()
+        await self.db_session.refresh(requirement)
+
+        logger.info(f"Updated requirement {requirement_id} status to {status.value}")
+        return requirement
+
+    async def get_requirement_files(
+        self,
+        requirement_id: UUID,
+        include_inactive: bool = False
+    ) -> List[RequirementFile]:
+        """
+        Get all files for a requirement.
+        
+        Args:
+            requirement_id: ID of the requirement
+            include_inactive: Whether to include inactive (deleted) files
+            
+        Returns:
+            List[RequirementFile]: List of requirement files
+        """
+        logger.info(f"Getting files for requirement {requirement_id}")
+
+        filters = [RequirementFile.requirement_id == requirement_id]
+        if not include_inactive:
+            filters.append(RequirementFile.is_active == True)
+
+        result = await self.db_session.execute(
+            select(RequirementFile)
+            .filter(and_(*filters))
+            .order_by(RequirementFile.upload_timestamp.desc())
+        )
+        
+        files = result.scalars().all()
+        logger.info(f"Found {len(files)} files for requirement {requirement_id}")
+        return files
+
+    async def delete_requirement_file(
+        self,
+        requirement_id: UUID,
+        file_id: UUID,
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Soft delete a requirement file.
+        
+        Args:
+            requirement_id: ID of the requirement
+            file_id: ID of the file to delete
+            user_context: User context for audit
+            
+        Returns:
+            bool: True if deleted, False if not found
+        """
+        logger.info(f"Deleting file {file_id} from requirement {requirement_id}")
+
+        # Find the file
+        result = await self.db_session.execute(
+            select(RequirementFile).filter(
+                and_(
+                    RequirementFile.id == file_id,
+                    RequirementFile.requirement_id == requirement_id,
+                    RequirementFile.is_active == True
+                )
+            )
+        )
+        
+        requirement_file = result.scalar_one_or_none()
+        if not requirement_file:
+            logger.warning(f"File {file_id} not found or already deleted")
+            return False
+
+        # Soft delete
+        requirement_file.is_active = False
+        
+        await self.db_session.commit()
+        
+        logger.info(f"Soft deleted file {file_id} from requirement {requirement_id}")
+        return True
+
+    async def _validate_requirement_files(self, files: List[UploadFile]) -> None:
+        """
+        Validate files for requirement upload context.
+        
+        Args:
+            files: List of files to validate
+            
+        Raises:
+            ValueError: If validation fails
+        """
+        if not files:
+            raise ValueError("No files provided for upload")
+
+        # Define allowed file types for requirements
+        allowed_extensions = {
+            'pdf', 'doc', 'docx', 'txt', 'rtf',  # Documents
+            'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp', 'svg',  # Images
+            'cad', 'dwg', 'step', 'iges', 'obj', 'fbx', '3ds', 'max', 'blend',  # CAD files
+            'xls', 'xlsx', 'csv', 'ods',  # Spreadsheets
+            'zip', 'rar', '7z', 'tar', 'gz'  # Archives
+        }
+        
+        max_file_size = 100 * 1024 * 1024  # 100MB
+        max_total_size = 500 * 1024 * 1024  # 500MB
+        
+        total_size = 0
+        filenames = set()
+        
+        for file in files:
+            # Check filename
+            if not file.filename:
+                raise ValueError("File must have a filename")
+            
+            if file.filename in filenames:
+                raise ValueError(f"Duplicate filename: {file.filename}")
+            filenames.add(file.filename)
+            
+            # Check file extension
+            if '.' not in file.filename:
+                raise ValueError(f"File must have an extension: {file.filename}")
+            
+            extension = file.filename.split('.')[-1].lower()
+            if extension not in allowed_extensions:
+                raise ValueError(
+                    f"File type '{extension}' not allowed for requirements. "
+                    f"Allowed types: {', '.join(sorted(allowed_extensions))}"
+                )
+            
+            # Check file size
+            file_size = getattr(file, 'size', 0)
+            if file_size > max_file_size:
+                raise ValueError(
+                    f"File '{file.filename}' exceeds maximum size limit "
+                    f"({max_file_size / (1024*1024):.1f}MB)"
+                )
+            
+            total_size += file_size
+        
+        # Check total size
+        if total_size > max_total_size:
+            raise ValueError(
+                f"Total upload size exceeds limit "
+                f"({max_total_size / (1024*1024):.1f}MB)"
+            )
 
     async def get_requirements_summary(self, project_id: UUID) -> Dict[str, Any]:
         """

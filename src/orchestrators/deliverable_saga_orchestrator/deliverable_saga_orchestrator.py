@@ -28,6 +28,13 @@ from src.events.client_feedback_events import (
     ReviewItemApprovedEvent,
     ReviewItemRejectedEvent,
 )
+# Import enhanced file workflow functionality
+from src.orchestrators.deliverable_saga_orchestrator.enhanced_file_workflow import (
+    check_all_reviews_approved,
+    get_latest_approved_review_items,
+    create_project_output,
+    check_project_completion,
+)
 
 # --- Import Events specific to Deliverable SAGA ---
 from src.events.deliverable_events import (
@@ -95,6 +102,7 @@ class DeliverableSagaOrchestrator:
             "ClientFeedbackSubmittedEvent": self.on_client_feedback_submitted,
             # Add handlers for other events as needed for more granular control
             "DeliverableDeliveredEvent": self.on_deliverable_delivered_final,  # The final success event for this SAGA
+            "GenerateFinalOutputCommand": self.handle_generate_final_output_command,  # Command to generate final output
         }
 
     async def _get_deliverable(
@@ -313,6 +321,12 @@ class DeliverableSagaOrchestrator:
             next_command = None
             command_topic = None
             command_id_to_record = None  # Default no command ID to record
+            
+            # Check if this is a completed rework task
+            is_rework = getattr(event, 'is_rework', False)
+            if is_rework:
+                logger.info(f"Completed task {event.task_id} is a rework task. Setting state to REVISIONS_IN_PROGRESS.")
+                next_state = DeliverableSagaState.REVISIONS_IN_PROGRESS
 
             # Get the next sequence number for this deliverable (needed for all paths)
             from sqlalchemy import func, select
@@ -440,6 +454,52 @@ class DeliverableSagaOrchestrator:
                 )
                 return
 
+            # Check if this is a rework task
+            is_rework = getattr(event, 'is_rework', False)
+            
+            if is_rework:
+                logger.info(f"Task {event.task_id} is a rework task. Creating review items for rework.")
+                
+                # For rework tasks, use the ProductionManagementService to create review items
+                # This ensures proper review round incrementing and file versioning
+                from src.services.production_management_service import ProductionManagementService
+                
+                production_service = ProductionManagementService(self.db_session_factory, self.event_bus)
+                
+                # Create file metadata from the event
+                file_metadata = [
+                    {"file_name": f"rework_file_{i+1}", "file_type": "unknown", "file_size": 0}
+                    for i in range(len(event.platform_file_ids))
+                ]
+                
+                # Create review items for the rework task
+                success = await production_service.create_review_items_for_completed_rework_task(
+                    task_id=event.task_id,
+                    platform_file_ids=event.platform_file_ids,
+                    file_metadata=file_metadata
+                )
+                
+                if success:
+                    # Update SAGA state to awaiting revision review
+                    next_state = DeliverableSagaState.AWAITING_REVISION_REVIEW
+                    await self.saga_processor.update_saga_state(
+                        session=session,
+                        saga_state=saga_state,
+                        new_state_enum=next_state,
+                        event_id=event.event_id,
+                        command_id=None,
+                    )
+                    
+                    logger.info(
+                        f"Deliverable SAGA for {event.deliverable_id} created review items for rework task '{event.task_name}' "
+                        f"and transitioned to {next_state.value}."
+                    )
+                else:
+                    logger.error(f"Failed to create review items for rework task {event.task_id}")
+                
+                return
+            
+            # Standard (non-rework) task handling
             # Determine what type of review item to create based on task type
             review_item_type = self._get_review_item_type_for_task(event.task_type)
             
@@ -609,6 +669,63 @@ class DeliverableSagaOrchestrator:
                 saga_state.current_state
             )  # Get current state as Enum
             next_state_enum = current_saga_state  # Default to no change
+            
+            # Enhanced file-based workflow handling
+            if event.feedback_type == "accept":
+                # Check if all review items for this deliverable are now approved
+                all_approved = await check_all_reviews_approved(session, event.deliverable_id)
+                
+                if all_approved:
+                    logger.info(f"All review items for deliverable {event.deliverable_id} are approved. Creating project output.")
+                    
+                    # Get the latest approved review items
+                    approved_items = await get_latest_approved_review_items(session, event.deliverable_id)
+                    
+                    # Create project output
+                    project_output = await create_project_output(
+                        session=session,
+                        deliverable_id=event.deliverable_id,
+                        project_id=event.project_id,
+                        approved_review_items=approved_items
+                    )
+                    
+                    if project_output:
+                        # Update deliverable status to DELIVERED
+                        deliverable = await self._get_deliverable(session, event.deliverable_id)
+                        if deliverable:
+                            deliverable.status = DeliverableStatus.DELIVERED.value
+                            session.add(deliverable)
+                            await session.commit()
+                            
+                            # Update SAGA state
+                            next_state_enum = DeliverableSagaState.DELIVERED
+                            
+                            # Publish DeliverableDeliveredEvent
+                            await self.saga_processor.publish_message(
+                                topic="project.deliverable.delivered",
+                                message_payload=DeliverableDeliveredEvent(
+                                    project_id=event.project_id,
+                                    deliverable_id=event.deliverable_id,
+                                    deliverable_name=deliverable.deliverable_name,
+                                    output_id=project_output.id,
+                                    output_url=project_output.output_url
+                                ),
+                            )
+                            
+                            # Check if project is now complete
+                            project_complete = await check_project_completion(session, event.project_id)
+                            if project_complete:
+                                logger.info(f"All deliverables for project {event.project_id} are delivered. Project is complete.")
+                                # Update project status to COMPLETED
+                                from src.models.project import Project, ProjectStatus
+                                project = await session.get(Project, event.project_id)
+                                if project:
+                                    project.status = ProjectStatus.COMPLETED.value
+                                    session.add(project)
+                                    await session.commit()
+                    else:
+                        logger.error(f"Failed to create project output for deliverable {event.deliverable_id}")
+                        next_state_enum = DeliverableSagaState.CLIENT_REVIEW_ACCEPTED
 
             # --- Core Logic for Client Feedback ---
             if event.feedback_type == "accept":
@@ -785,6 +902,18 @@ class DeliverableSagaOrchestrator:
             logger.info(
                 f"Deliverable SAGA for {event.deliverable_id} is now COMPLETED."
             )
+            
+            # Check if project is now complete
+            project_complete = await check_project_completion(session, event.project_id)
+            if project_complete:
+                logger.info(f"All deliverables for project {event.project_id} are delivered. Project is complete.")
+                # Update project status to COMPLETED
+                from src.models.project import Project, ProjectStatus
+                project = await session.get(Project, event.project_id)
+                if project:
+                    project.status = ProjectStatus.COMPLETED.value
+                    session.add(project)
+                    await session.commit()
 
     # --- Generic Event Dispatcher (similar to Project Orchestrator) ---
     async def handle_event(self, event_data: Dict[str, Any]):
@@ -971,3 +1100,146 @@ class DeliverableSagaOrchestrator:
         # Update SAGA state
         logger.info(f"Updating SAGA state to {next_state_enum}")
         await self.saga_processor.transition_state(next_state_enum)
+    async def handle_generate_final_output_command(self, command: GenerateFinalOutputCommand):
+        """
+        Handles GenerateFinalOutputCommand to create a final project output.
+        This is typically triggered when all review items for a deliverable are approved.
+        """
+        logger.info(
+            f"DeliverableSagaOrchestrator: Received GenerateFinalOutputCommand for Deliverable {command.deliverable_id}"
+        )
+
+        async with self.db_session_factory() as session:
+            try:
+                # Get the deliverable
+                deliverable = await self._get_deliverable(session, command.deliverable_id)
+                if not deliverable:
+                    logger.error(f"Deliverable {command.deliverable_id} not found")
+                    return
+                
+                # Get the approved review item if specified
+                approved_review_item = None
+                if command.approved_review_item_id:
+                    approved_review_item = await session.get(ReviewItem, command.approved_review_item_id)
+                    if not approved_review_item or approved_review_item.review_status != ReviewStatus.APPROVED.value:
+                        logger.error(f"Approved review item {command.approved_review_item_id} not found or not approved")
+                        return
+                
+                # Create project output
+                output = ProjectOutput(
+                    deliverable_id=command.deliverable_id,
+                    project_id=command.project_id,
+                    output_name=command.output_name,
+                    output_url=f"https://example.com/api/outputs/{command.deliverable_id}",
+                    comments_allowed_on_output=True
+                )
+                
+                session.add(output)
+                await session.commit()
+                
+                # Update deliverable status to DELIVERED
+                deliverable.status = DeliverableStatus.DELIVERED.value
+                session.add(deliverable)
+                await session.commit()
+                
+                # Publish DeliverableDeliveredEvent
+                await self.saga_processor.publish_message(
+                    topic="project.deliverable.delivered",
+                    message_payload=DeliverableDeliveredEvent(
+                        project_id=command.project_id,
+                        deliverable_id=command.deliverable_id,
+                        deliverable_name=deliverable.deliverable_name,
+                        output_id=output.id,
+                        output_url=output.output_url
+                    ),
+                )
+                
+                logger.info(f"Created project output {output.id} for deliverable {command.deliverable_id}")
+                
+            except Exception as e:
+                logger.error(f"Error handling GenerateFinalOutputCommand: {e}", exc_info=True)    a
+sync def handle_generate_final_output_command(self, command: GenerateFinalOutputCommand):
+        """
+        Handles GenerateFinalOutputCommand.
+        This command triggers the generation of a final project output for a deliverable.
+        """
+        logger.info(
+            f"DeliverableSagaOrchestrator: Received GenerateFinalOutputCommand for Deliverable {command.deliverable_id}"
+        )
+
+        async with self.db_session_factory() as session:
+            saga_state = await self.saga_processor.get_or_create_saga_state(
+                session=session,
+                project_id=command.project_id,
+                deliverable_id=command.deliverable_id,
+                saga_type=SagaType.DELIVERABLE_PRODUCTION,
+                initial_state=DeliverableSagaState.AWAITING_CLIENT_FEEDBACK.value,
+                saga_id=command.deliverable_id,
+            )
+
+            # Idempotency check
+            if saga_state.last_event_processed_id == str(command.command_id):
+                logger.warning(
+                    f"DeliverableSagaOrchestrator: GenerateFinalOutputCommand {command.command_id} already processed for Deliverable {command.deliverable_id}. Idempotent."
+                )
+                return
+
+            # Check if all reviews are approved
+            all_approved = await check_all_reviews_approved(session, command.deliverable_id)
+            
+            if not all_approved:
+                logger.warning(f"Cannot generate final output for deliverable {command.deliverable_id} as not all reviews are approved.")
+                return
+            
+            # Get the latest approved review items
+            approved_items = await get_latest_approved_review_items(session, command.deliverable_id)
+            
+            # Create project output
+            output = await create_project_output(
+                session, 
+                command.deliverable_id, 
+                command.project_id,
+                approved_items
+            )
+            
+            if output:
+                # Mark files as final versions
+                from src.services.project_output_service import ProjectOutputService
+                project_output_service = ProjectOutputService(self.db_session_factory, self.event_bus)
+                await project_output_service.mark_files_as_final_versions(command.deliverable_id)
+                
+                # Compile the final deliverable
+                await project_output_service.compile_final_deliverable(command.deliverable_id, output.id)
+                
+                # Check if project is now complete
+                project_complete = await check_project_completion(session, command.project_id)
+                if project_complete:
+                    logger.info(f"All deliverables for project {command.project_id} are delivered. Project is complete.")
+                    # Process project completion
+                    await project_output_service.process_project_completion(command.project_id)
+            
+                # Transition SAGA State to DELIVERED
+                next_state = DeliverableSagaState.DELIVERED
+                await self.saga_processor.update_saga_state(
+                    session=session,
+                    saga_state=saga_state,
+                    new_state_enum=next_state,
+                    event_id=command.command_id,
+                )
+                logger.info(
+                    f"Deliverable SAGA for {command.deliverable_id} transitioned to {next_state.value} after generating final output."
+                )
+                
+                # Publish DeliverableDeliveredEvent
+                from src.events.project_events import DeliverableDeliveredEvent
+                await self.saga_processor.publish_message(
+                    topic="deliverable.delivered",
+                    message_payload=DeliverableDeliveredEvent(
+                        project_id=command.project_id,
+                        deliverable_id=command.deliverable_id,
+                        deliverable_name="Unknown",  # We don't have deliverable name in the command
+                        output_id=output.id
+                    ),
+                )
+            else:
+                logger.error(f"Failed to create project output for deliverable {command.deliverable_id}")
