@@ -273,7 +273,6 @@ class RequirementService:
         project_result = await self.db_session.execute(
             select(Requirement)
             .filter(and_(*project_filters))
-            .options(selectinload(Requirement.deliverable))
             .order_by(Requirement.requirement_name)
         )
         project_requirements = project_result.scalars().all()
@@ -289,7 +288,6 @@ class RequirementService:
             deliverable_result = await self.db_session.execute(
                 select(Requirement)
                 .filter(and_(*deliverable_filters))
-                .options(selectinload(Requirement.deliverable))
                 .order_by(Requirement.requirement_name)
             )
             result["deliverable_specific"] = deliverable_result.scalars().all()

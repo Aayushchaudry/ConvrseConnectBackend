@@ -145,6 +145,15 @@ class SagaProcessor:
             message_dict = message_payload
 
         await self.event_bus.publish(topic=topic, message=message_dict)
+        
+        # Determine message type for logging
+        if hasattr(message_payload, 'command_type'):
+            message_type = message_payload.command_type
+        elif hasattr(message_payload, 'event_type'):
+            message_type = message_payload.event_type
+        else:
+            message_type = "Unknown"
+            
         logger.info(
-            f"Published message to topic '{topic}': {message_payload.command_type if hasattr(message_payload, 'command_type') else message_payload.event_type}"
+            f"Published message to topic '{topic}': {message_type}"
         )

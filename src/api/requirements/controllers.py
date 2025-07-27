@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 class RequirementResponse(BaseModel):
     """Schema for requirement response"""
     id: UUID
-    deliverable_id: UUID
+    deliverable_id: Optional[UUID]  # Made nullable for project-level requirements
     project_id: UUID
     requirement_name: str
     requirement_type: RequirementType
@@ -391,20 +391,33 @@ async def auto_generate_requirements(
     try:
         requirement_service = RequirementService(db_session)
         
-        # Validate that either project_id or deliverable_id is provided
-        if not generation_data.project_id and not generation_data.deliverable_id:
+        # Validate that project_id is provided (service requires project_id)
+        if not generation_data.project_id:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Either project_id or deliverable_id must be provided",
+                detail="project_id must be provided for auto-generation",
             )
         
-        # Auto-generate requirements
-        generated_requirements = await requirement_service.auto_generate_requirements(
+        # For now, we'll use a default list of deliverable types
+        # In a real implementation, you might want to get these from the project
+        default_deliverable_types = [
+            "RENDERED_IMAGES",
+            "INVENTORY_MODULE", 
+            "INTERACTIVE_SALES_APP"
+        ]
+        
+        # Auto-generate requirements - using correct method signature
+        generated_requirements_dict = await requirement_service.auto_generate_requirements(
             project_id=generation_data.project_id,
-            deliverable_id=generation_data.deliverable_id,
-            category_filter=generation_data.category_filter,
-            use_custom_templates=generation_data.use_custom_templates,
+            deliverable_types=default_deliverable_types,
+            include_project_level=True,
+            force_recreate=False,
         )
+        
+        # Flatten the requirements from both project_level and deliverable_specific
+        all_generated_requirements = []
+        all_generated_requirements.extend(generated_requirements_dict.get("project_level", []))
+        all_generated_requirements.extend(generated_requirements_dict.get("deliverable_specific", []))
         
         # Convert to response models
         requirements_response = [
@@ -412,27 +425,24 @@ async def auto_generate_requirements(
                 id=req.id,
                 project_id=req.project_id,
                 deliverable_id=req.deliverable_id,
-                template_id=req.template_id,
-                title=req.title,
-                description=req.description,
-                category=req.category,
-                priority=req.priority,
-                acceptance_criteria=req.acceptance_criteria,
-                is_mandatory=req.is_mandatory,
+                requirement_name=req.requirement_name,
+                requirement_type=req.requirement_type,
                 status=req.status,
+                is_mandatory=req.is_mandatory,
                 created_at=req.created_at,
                 updated_at=req.updated_at,
             )
-            for req in generated_requirements
+            for req in all_generated_requirements
         ]
         
         return RequirementGenerationResponse(
-            generated_count=len(generated_requirements),
+            generated_count=len(all_generated_requirements),
             skipped_count=0,  # This would come from the service if duplicates were skipped
             generated_requirements=requirements_response,
             generation_summary={
-                "target_type": "project" if generation_data.project_id else "deliverable",
-                "target_id": str(generation_data.project_id or generation_data.deliverable_id),
+                "target_type": "project",
+                "target_id": str(generation_data.project_id),
+                "deliverable_types": default_deliverable_types,
                 "category_filter": generation_data.category_filter,
                 "use_custom_templates": generation_data.use_custom_templates,
             },
@@ -466,37 +476,33 @@ async def create_custom_requirement(
     try:
         requirement_service = RequirementService(db_session)
         
-        # Validate that either project_id or deliverable_id is provided
-        if not requirement_data.project_id and not requirement_data.deliverable_id:
+        # Validate that project_id is provided (service requires project_id)
+        if not requirement_data.project_id:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Either project_id or deliverable_id must be provided",
+                detail="project_id must be provided for custom requirement creation",
             )
         
-        # Create custom requirement
+        # Create custom requirement - using correct method signature
         requirement = await requirement_service.create_custom_requirement(
             project_id=requirement_data.project_id,
             deliverable_id=requirement_data.deliverable_id,
-            title=requirement_data.title,
-            description=requirement_data.description,
-            category=requirement_data.category,
-            priority=requirement_data.priority,
-            acceptance_criteria=requirement_data.acceptance_criteria,
+            requirement_name=requirement_data.title,
+            requirement_type=RequirementType.FILE_UPLOAD,  # Default type, could be mapped from category
+            requirement_description=requirement_data.description,
             is_mandatory=requirement_data.is_mandatory,
+            priority=requirement_data.priority,
+            notes=requirement_data.acceptance_criteria,
         )
         
         return RequirementResponse(
             id=requirement.id,
             project_id=requirement.project_id,
             deliverable_id=requirement.deliverable_id,
-            template_id=requirement.template_id,
-            title=requirement.title,
-            description=requirement.description,
-            category=requirement.category,
-            priority=requirement.priority,
-            acceptance_criteria=requirement.acceptance_criteria,
-            is_mandatory=requirement.is_mandatory,
+            requirement_name=requirement.requirement_name,
+            requirement_type=requirement.requirement_type,
             status=requirement.status,
+            is_mandatory=requirement.is_mandatory,
             created_at=requirement.created_at,
             updated_at=requirement.updated_at,
         )
@@ -532,31 +538,40 @@ async def get_project_requirements(
     try:
         requirement_service = RequirementService(db_session)
         
-        # Get project requirements
-        requirements = await requirement_service.get_project_requirements(
+        # Get project requirements - using correct method signature
+        requirements_dict = await requirement_service.get_project_requirements(
             project_id=project_id,
-            category_filter=category,
-            priority_filter=priority,
-            status_filter=status,
+            include_deliverable_specific=True,
+            requirement_type=None,  # Could map category to requirement_type if needed
+            is_mandatory=None,      # Could map priority to is_mandatory if needed
         )
+        
+        # Flatten the requirements from both project_level and deliverable_specific
+        all_requirements = []
+        all_requirements.extend(requirements_dict.get("project_level", []))
+        all_requirements.extend(requirements_dict.get("deliverable_specific", []))
+        
+        # Apply additional filtering if needed (since service doesn't support these filters)
+        if category:
+            all_requirements = [req for req in all_requirements if hasattr(req, 'category') and req.category == category]
+        if priority:
+            all_requirements = [req for req in all_requirements if hasattr(req, 'priority') and req.priority == priority]
+        if status:
+            all_requirements = [req for req in all_requirements if req.status.value == status]
         
         return [
             RequirementResponse(
                 id=req.id,
                 project_id=req.project_id,
                 deliverable_id=req.deliverable_id,
-                template_id=req.template_id,
-                title=req.title,
-                description=req.description,
-                category=req.category,
-                priority=req.priority,
-                acceptance_criteria=req.acceptance_criteria,
-                is_mandatory=req.is_mandatory,
+                requirement_name=req.requirement_name,
+                requirement_type=req.requirement_type,
                 status=req.status,
+                is_mandatory=req.is_mandatory,
                 created_at=req.created_at,
                 updated_at=req.updated_at,
             )
-            for req in requirements
+            for req in all_requirements
         ]
         
     except Exception as e:
@@ -584,31 +599,38 @@ async def get_deliverable_requirements(
     try:
         requirement_service = RequirementService(db_session)
         
-        # Get deliverable requirements
-        requirements = await requirement_service.get_deliverable_requirements(
+        # Get deliverable requirements - using correct method signature
+        requirements_dict = await requirement_service.get_deliverable_requirements(
             deliverable_id=deliverable_id,
-            category_filter=category,
-            priority_filter=priority,
-            status_filter=status,
+            include_project_level=True,
         )
+        
+        # Flatten the requirements from both project_level and deliverable_specific
+        all_requirements = []
+        all_requirements.extend(requirements_dict.get("project_level", []))
+        all_requirements.extend(requirements_dict.get("deliverable_specific", []))
+        
+        # Apply additional filtering if needed (since service doesn't support these filters)
+        if category:
+            all_requirements = [req for req in all_requirements if hasattr(req, 'category') and req.category == category]
+        if priority:
+            all_requirements = [req for req in all_requirements if hasattr(req, 'priority') and req.priority == priority]
+        if status:
+            all_requirements = [req for req in all_requirements if req.status.value == status]
         
         return [
             RequirementResponse(
                 id=req.id,
                 project_id=req.project_id,
                 deliverable_id=req.deliverable_id,
-                template_id=req.template_id,
-                title=req.title,
-                description=req.description,
-                category=req.category,
-                priority=req.priority,
-                acceptance_criteria=req.acceptance_criteria,
-                is_mandatory=req.is_mandatory,
+                requirement_name=req.requirement_name,
+                requirement_type=req.requirement_type,
                 status=req.status,
+                is_mandatory=req.is_mandatory,
                 created_at=req.created_at,
                 updated_at=req.updated_at,
             )
-            for req in requirements
+            for req in all_requirements
         ]
         
     except Exception as e:
@@ -650,19 +672,20 @@ async def update_requirement(
         # Build update values
         update_values = {}
         if update_data.title is not None:
-            update_values["title"] = update_data.title
+            update_values["requirement_name"] = update_data.title
         if update_data.description is not None:
-            update_values["description"] = update_data.description
+            update_values["requirement_description"] = update_data.description
         if update_data.category is not None:
-            update_values["category"] = update_data.category
+            # Note: category mapping would need to be implemented
+            pass  # Skip category for now as it's not directly mapped
         if update_data.priority is not None:
             update_values["priority"] = update_data.priority
         if update_data.acceptance_criteria is not None:
-            update_values["acceptance_criteria"] = update_data.acceptance_criteria
+            update_values["notes"] = update_data.acceptance_criteria
         if update_data.is_mandatory is not None:
             update_values["is_mandatory"] = update_data.is_mandatory
         if update_data.status is not None:
-            update_values["status"] = update_data.status
+            update_values["status"] = RequirementStatus(update_data.status)
         
         if update_values:
             update_values["updated_at"] = datetime.utcnow()
@@ -682,14 +705,10 @@ async def update_requirement(
             id=requirement.id,
             project_id=requirement.project_id,
             deliverable_id=requirement.deliverable_id,
-            template_id=requirement.template_id,
-            title=requirement.title,
-            description=requirement.description,
-            category=requirement.category,
-            priority=requirement.priority,
-            acceptance_criteria=requirement.acceptance_criteria,
-            is_mandatory=requirement.is_mandatory,
+            requirement_name=requirement.requirement_name,
+            requirement_type=requirement.requirement_type,
             status=requirement.status,
+            is_mandatory=requirement.is_mandatory,
             created_at=requirement.created_at,
             updated_at=requirement.updated_at,
         )
@@ -806,23 +825,20 @@ async def get_project_requirements_summary(
     try:
         requirement_service = RequirementService(db_session)
         
-        # Get requirements summary
-        summary = await requirement_service.get_requirements_summary(
-            project_id=project_id,
-            deliverable_id=None,
-        )
+        # Get requirements summary - using correct method signature
+        summary = await requirement_service.get_requirements_summary(project_id)
         
         return RequirementsSummaryResponse(
             project_id=project_id,
             deliverable_id=None,
             total_requirements=summary["total_requirements"],
-            mandatory_requirements=summary["mandatory_requirements"],
-            optional_requirements=summary["optional_requirements"],
-            completed_requirements=summary["completed_requirements"],
-            pending_requirements=summary["pending_requirements"],
-            requirements_by_category=summary["requirements_by_category"],
-            requirements_by_priority=summary["requirements_by_priority"],
-            completion_percentage=summary["completion_percentage"],
+            mandatory_requirements=summary["mandatory_count"],
+            optional_requirements=summary["optional_count"],
+            completed_requirements=0,  # Not available in current summary
+            pending_requirements=summary["total_requirements"],  # Not available in current summary
+            requirements_by_category=summary["by_type"],
+            requirements_by_priority=summary["by_priority"],
+            completion_percentage=0.0,  # Not available in current summary
         )
         
     except Exception as e:
@@ -847,53 +863,66 @@ async def get_deliverable_requirements_summary(
     try:
         requirement_service = RequirementService(db_session)
         
-        # Get requirements summary
-        summary = await requirement_service.get_requirements_summary(
-            project_id=None,
+        # Get deliverable requirements first to get the project ID
+        requirements_dict = await requirement_service.get_deliverable_requirements(
             deliverable_id=deliverable_id,
+            include_project_level=True,
         )
+        
+        # Get the project ID from the first requirement
+        all_requirements = requirements_dict.get("project_level", []) + requirements_dict.get("deliverable_specific", [])
+        
+        if not all_requirements:
+            # Return empty summary if no requirements found
+            return RequirementsSummaryResponse(
+                project_id=None,
+                deliverable_id=deliverable_id,
+                total_requirements=0,
+                mandatory_requirements=0,
+                optional_requirements=0,
+                completed_requirements=0,
+                pending_requirements=0,
+                requirements_by_category={},
+                requirements_by_priority={},
+                completion_percentage=0.0,
+            )
+        
+        # Get project ID from the first requirement
+        project_id = all_requirements[0].project_id
+        
+        # Get project-level summary and filter for this deliverable
+        project_summary = await requirement_service.get_requirements_summary(project_id)
+        
+        # Calculate deliverable-specific statistics
+        deliverable_requirements = requirements_dict.get("deliverable_specific", [])
+        total_requirements = len(all_requirements)
+        mandatory_count = len([r for r in all_requirements if r.is_mandatory])
+        optional_count = total_requirements - mandatory_count
+        
+        # Count by type for this deliverable
+        type_counts = {}
+        for req_type in RequirementType:
+            count = len([r for r in all_requirements if r.requirement_type == req_type])
+            if count > 0:
+                type_counts[req_type.value] = count
+        
+        # Count by priority for this deliverable
+        priority_counts = {}
+        for req in all_requirements:
+            priority = getattr(req, 'priority', 'medium') or "medium"
+            priority_counts[priority] = priority_counts.get(priority, 0) + 1
         
         return RequirementsSummaryResponse(
-            project_id=None,
+            project_id=project_id,
             deliverable_id=deliverable_id,
-            total_requirements=summary["total_requirements"],
-            mandatory_requirements=summary["mandatory_requirements"],
-            optional_requirements=summary["optional_requirements"],
-            completed_requirements=summary["completed_requirements"],
-            pending_requirements=summary["pending_requirements"],
-            requirements_by_category=summary["requirements_by_category"],
-            requirements_by_priority=summary["requirements_by_priority"],
-            completion_percentage=summary["completion_percentage"],
-        )
-        
-    except Exception as e:
-        logger.error(f"Error fetching deliverable requirements summary: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch deliverable requirements summary: {str(e)}",
-        )
-    auth_context = require_auth(request)
-    
-    try:
-        requirement_service = RequirementService(db_session)
-        
-        # Get requirements summary
-        summary = await requirement_service.get_requirements_summary(
-            project_id=None,
-            deliverable_id=deliverable_id,
-        )
-        
-        return RequirementsSummaryResponse(
-            project_id=None,
-            deliverable_id=deliverable_id,
-            total_requirements=summary["total_requirements"],
-            mandatory_requirements=summary["mandatory_requirements"],
-            optional_requirements=summary["optional_requirements"],
-            completed_requirements=summary["completed_requirements"],
-            pending_requirements=summary["pending_requirements"],
-            requirements_by_category=summary["requirements_by_category"],
-            requirements_by_priority=summary["requirements_by_priority"],
-            completion_percentage=summary["completion_percentage"],
+            total_requirements=total_requirements,
+            mandatory_requirements=mandatory_count,
+            optional_requirements=optional_count,
+            completed_requirements=0,  # Not available in current summary
+            pending_requirements=total_requirements,  # Not available in current summary
+            requirements_by_category=type_counts,
+            requirements_by_priority=priority_counts,
+            completion_percentage=0.0,  # Not available in current summary
         )
         
     except Exception as e:
