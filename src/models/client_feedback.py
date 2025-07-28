@@ -35,11 +35,11 @@ from src.models.review_item import ReviewItem  # Import ReviewItem model for For
 class FeedbackType(enum.Enum):
     """Defines the type of feedback provided by the client."""
 
-    ACCEPT = "accept"  # Client fully approves
-    REJECT = "reject"  # Client fully rejects
-    COMMENT = "comment"  # Client provides text comments (requires rework)
-    LIKE = "like"  # Client likes a specific option (e.g., a render option)
-    FINAL_APPROVAL = "final_approval"  # Specific approval for a final deliverable
+    ACCEPT = "ACCEPT"  # Client fully approves
+    REJECT = "REJECT"  # Client fully rejects
+    COMMENT = "COMMENT"  # Client provides text comments (requires rework)
+    LIKE = "LIKE"  # Client likes a specific option (e.g., a render option)
+    FINAL_APPROVAL = "FINAL_APPROVAL"  # Specific approval for a final deliverable
 
 
 # --- ClientFeedback ORM Model ---

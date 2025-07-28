@@ -7,18 +7,22 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.config.database import get_db_session
 from src.middleware.auth_middleware import get_required_auth_dependency
 from src.models.client_feedback import FeedbackType
 from src.models.review_feedback_result import ReviewFeedbackResult
-from src.models.review_item import ReviewItemType, ReviewStatus
+from src.models.review_item import ReviewItemType, ReviewStatus, ReviewItem
+from src.models.review_feedback import ReviewFeedback
 from src.services.file_upload_integration_service import FileUploadIntegrationService
 from src.services.file_version_service import FileVersionService
 from src.services.review_management_service import ReviewManagementService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["review-items"])
+router = APIRouter(tags=["review-items"])
 
 
 class ReviewItemFileResponse(BaseModel):
@@ -423,4 +427,138 @@ async def create_file_version(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating the file version"
+        )
+
+
+@router.get(
+    "/deliverables/{deliverable_id}/review-items",
+    response_model=List[Dict],
+)
+async def get_deliverable_review_items(
+    deliverable_id: UUID,
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
+):
+    """
+    Get all review items for a specific deliverable.
+    
+    Returns:
+        List[Dict]: List of review items with their details
+    """
+    logger.info(f"Getting review items for deliverable {deliverable_id}")
+    
+    try:
+        # Query review items for the deliverable
+        result = await db_session.execute(
+            select(ReviewItem)
+            .filter(ReviewItem.deliverable_id == deliverable_id)
+            .order_by(ReviewItem.sequence_number, ReviewItem.review_round, ReviewItem.created_at)
+        )
+        review_items = result.scalars().all()
+        
+        # Convert to response format
+        response_items = []
+        for item in review_items:
+            # Get feedback count for each review item
+            feedback_count_result = await db_session.execute(
+                select(func.count())
+                .select_from(ReviewFeedback)
+                .filter(ReviewFeedback.review_item_id == item.id)
+            )
+            feedback_count = feedback_count_result.scalar() or 0
+            
+            response_items.append({
+                "id": str(item.id),
+                "project_id": str(item.project_id),
+                "deliverable_id": str(item.deliverable_id),
+                "source_internal_task_id": str(item.source_internal_task_id),
+                "item_type": item.item_type.value,
+                "platform_file_id": str(item.platform_file_id) if item.platform_file_id else None,
+                "item_url": item.item_url,
+                "description": item.description,
+                "review_status": item.review_status.value,
+                "sequence_number": item.sequence_number,
+                "review_round": item.review_round,
+                "presented_at": item.presented_at.isoformat() if item.presented_at else None,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+                "feedback_count": feedback_count
+            })
+        
+        return response_items
+        
+    except Exception as e:
+        logger.error(f"Error getting review items for deliverable {deliverable_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving review items"
+        )
+
+
+@router.get(
+    "/projects/{project_id}/deliverables/{deliverable_id}/review_items",
+    response_model=List[Dict],
+)
+async def get_project_deliverable_review_items(
+    project_id: UUID,
+    deliverable_id: UUID,
+    current_user=Depends(get_required_auth_dependency()),
+    db_session=Depends(get_db_session),
+):
+    """
+    Get all review items for a specific deliverable within a project.
+    
+    Returns:
+        List[Dict]: List of review items with their details
+    """
+    logger.info(f"Getting review items for project {project_id}, deliverable {deliverable_id}")
+    
+    try:
+        # Query review items for the deliverable within the project
+        result = await db_session.execute(
+            select(ReviewItem)
+            .filter(
+                ReviewItem.project_id == project_id,
+                ReviewItem.deliverable_id == deliverable_id
+            )
+            .order_by(ReviewItem.sequence_number, ReviewItem.review_round, ReviewItem.created_at)
+        )
+        review_items = result.scalars().all()
+        
+        # Convert to response format
+        response_items = []
+        for item in review_items:
+            # Get feedback count for each review item
+            feedback_count_result = await db_session.execute(
+                select(func.count())
+                .select_from(ReviewFeedback)
+                .filter(ReviewFeedback.review_item_id == item.id)
+            )
+            feedback_count = feedback_count_result.scalar() or 0
+            
+            response_items.append({
+                "id": str(item.id),
+                "project_id": str(item.project_id),
+                "deliverable_id": str(item.deliverable_id),
+                "source_internal_task_id": str(item.source_internal_task_id),
+                "item_type": item.item_type.value,
+                "platform_file_id": str(item.platform_file_id) if item.platform_file_id else None,
+                "item_url": item.item_url,
+                "description": item.description,
+                "review_status": item.review_status.value,
+                "sequence_number": item.sequence_number,
+                "review_round": item.review_round,
+                "presented_at": item.presented_at.isoformat() if item.presented_at else None,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+                "feedback_count": feedback_count
+            })
+        
+        return response_items
+        
+    except Exception as e:
+        logger.error(f"Error getting review items for project {project_id}, deliverable {deliverable_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving review items"
         )

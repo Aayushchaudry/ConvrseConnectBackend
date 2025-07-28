@@ -1,0 +1,505 @@
+{
+	"info": {
+		"_postman_id": "review-items-api-collection",
+		"name": "Review Items & Feedback API Collection",
+		"description": "Complete API collection for review items management and client feedback functionality. Use this for frontend integration.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "your_auth_token_here",
+			"type": "string"
+		},
+		{
+			"key": "task_id",
+			"value": "your_task_id_here",
+			"type": "string"
+		},
+		{
+			"key": "review_item_id",
+			"value": "your_review_item_id_here",
+			"type": "string"
+		},
+		{
+			"key": "file_id",
+			"value": "your_file_id_here",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "📋 Review Items Management",
+			"item": [
+				{
+					"name": "Complete Task with Files (Create Review Items)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.length > 0) {",
+									"        pm.collectionVariables.set('review_item_id', response[0].review_item_id);",
+									"        console.log('Review Item ID set:', response[0].review_item_id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "review_item_type",
+									"value": "STATIC_RENDER",
+									"type": "text",
+									"description": "Type of review item (STATIC_RENDER, TEXTURE_REVIEW, FINAL_RENDER, WORK_REVIEW)"
+								},
+								{
+									"key": "notes",
+									"value": "Completed modeling task with render files",
+									"type": "text",
+									"description": "Optional notes about the completion"
+								},
+								{
+									"key": "files",
+									"type": "file",
+									"description": "Upload files for review (multiple files supported)"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/{{task_id}}/complete-with-files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "internal-tasks", "{{task_id}}", "complete-with-files"]
+						},
+						"description": "Complete a task and create review items with uploaded files. This automatically creates review items for client feedback."
+					}
+				},
+				{
+					"name": "Get Review Item Files",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.length > 0) {",
+									"        pm.collectionVariables.set('file_id', response[0].id);",
+									"        console.log('File ID set:', response[0].id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "files"]
+						},
+						"description": "Get all files associated with a review item, including version information."
+					}
+				},
+				{
+					"name": "Update Review Item Status",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"IN_REVIEW\",\n  \"comment\": \"Moving to review status\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/status",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "status"]
+						},
+						"description": "Update the status of a review item (PENDING_REVIEW, IN_REVIEW, APPROVED, REJECTED, REWORK_REQUIRED)."
+					}
+				},
+				{
+					"name": "Create File Version",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "new_file",
+									"type": "file",
+									"description": "New file version to upload"
+								},
+								{
+									"key": "version_notes",
+									"value": "Updated version with client feedback",
+									"type": "text",
+									"description": "Optional notes about the version"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/files/{{file_id}}/version",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "files", "{{file_id}}", "version"]
+						},
+						"description": "Create a new version of a review item file."
+					}
+				}
+			]
+		},
+		{
+			"name": "💬 Client Feedback",
+			"item": [
+				{
+					"name": "Submit ACCEPT Feedback",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedback_type\": \"ACCEPT\",\n  \"comment_text\": \"Perfect! This looks exactly what we wanted.\",\n  \"timestamp_seconds\": null,\n  \"coordinates\": null,\n  \"new_platform_file_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Submit ACCEPT feedback for a review item. This approves the work and may trigger next steps."
+					}
+				},
+				{
+					"name": "Submit REJECT Feedback",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedback_type\": \"REJECT\",\n  \"comment_text\": \"The lighting needs to be brighter and the composition needs adjustment.\",\n  \"timestamp_seconds\": null,\n  \"coordinates\": null,\n  \"new_platform_file_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Submit REJECT feedback for a review item. This automatically creates rework tasks."
+					}
+				},
+				{
+					"name": "Submit COMMENT Feedback",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedback_type\": \"COMMENT\",\n  \"comment_text\": \"Can you make the background slightly darker?\",\n  \"timestamp_seconds\": null,\n  \"coordinates\": {\n    \"x\": 150,\n    \"y\": 200,\n    \"width\": 100,\n    \"height\": 50\n  },\n  \"new_platform_file_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Submit COMMENT feedback with specific coordinates for image annotations."
+					}
+				},
+				{
+					"name": "Submit LIKE Feedback",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedback_type\": \"LIKE\",\n  \"comment_text\": \"I really like this version!\",\n  \"timestamp_seconds\": null,\n  \"coordinates\": null,\n  \"new_platform_file_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Submit LIKE feedback for a review item. This is a positive feedback that doesn't necessarily change the review status."
+					}
+				},
+				{
+					"name": "Submit FINAL_APPROVAL Feedback",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedback_type\": \"FINAL_APPROVAL\",\n  \"comment_text\": \"This is perfect for final delivery!\",\n  \"timestamp_seconds\": null,\n  \"coordinates\": null,\n  \"new_platform_file_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Submit FINAL_APPROVAL feedback for a review item. This is specific approval for a final deliverable."
+					}
+				},
+				{
+					"name": "Submit Feedback with New File Version",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedback_type\": \"REJECT\",\n  \"comment_text\": \"Please use the updated reference file I'm providing.\",\n  \"timestamp_seconds\": null,\n  \"coordinates\": null,\n  \"new_platform_file_id\": \"new-file-version-id-here\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Submit feedback with a new file version attached."
+					}
+				},
+				{
+					"name": "Get Feedback History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Get complete feedback history for a review item, ordered by submission time (newest first)."
+					}
+				}
+			]
+		},
+		{
+			"name": "📊 Review Items by Deliverable",
+			"item": [
+				{
+					"name": "Get Deliverable Review Items",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/deliverables/{{deliverable_id}}/review-items",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "deliverables", "{{deliverable_id}}", "review-items"]
+						},
+						"description": "Get all review items for a specific deliverable."
+					}
+				}
+			]
+		},
+		{
+			"name": "🔄 Task Completion Workflow",
+			"item": [
+				{
+					"name": "1. Complete Task with Files",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "review_item_type",
+									"value": "STATIC_RENDER",
+									"type": "text"
+								},
+								{
+									"key": "notes",
+									"value": "Completed 3D modeling task",
+									"type": "text"
+								},
+								{
+									"key": "files",
+									"type": "file"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/internal-tasks/{{task_id}}/complete-with-files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "internal-tasks", "{{task_id}}", "complete-with-files"]
+						},
+						"description": "Step 1: Complete a task and create review items with uploaded files."
+					}
+				},
+				{
+					"name": "2. Submit Client Feedback",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"feedback_type\": \"ACCEPT\",\n  \"comment_text\": \"Perfect! Approved for production.\",\n  \"timestamp_seconds\": null,\n  \"coordinates\": null,\n  \"new_platform_file_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/feedback",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "feedback"]
+						},
+						"description": "Step 2: Submit client feedback on the review item."
+					}
+				},
+				{
+					"name": "3. Check Review Item Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/connect/api/v1/review-items/{{review_item_id}}/files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "connect", "api", "v1", "review-items", "{{review_item_id}}", "files"]
+						},
+						"description": "Step 3: Check the review item files and status."
+					}
+				}
+			]
+		}
+	]
+} 

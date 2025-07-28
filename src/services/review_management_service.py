@@ -205,10 +205,11 @@ class ReviewManagementService:
         self, command: GenerateReviewItemCommand
     ):
         """
-        Handles GenerateReviewItemCommand to create a new ReviewItem for client feedback.
+        Handles GenerateReviewItemCommand. Creates a new ReviewItem for a deliverable.
+        Enhanced to support rework tasks with proper review round incrementing.
         """
         logger.info(
-            f"ReviewManagementService: Received GenerateReviewItemCommand for Deliverable {command.deliverable_id} (Type: {command.review_item_type})"
+            f"ReviewManagementService: Received GenerateReviewItemCommand for Deliverable {command.deliverable_id}, Type: {command.review_item_type}"
         )
 
         async with self.db_session_factory() as session:
@@ -217,32 +218,51 @@ class ReviewManagementService:
                     session, command.project_id, command.deliverable_id
                 )
 
-                # Since GenerateReviewItemCommand doesn't have source_internal_task_id or review_round,
-                # we'll set defaults and use the most recent modeling task for this deliverable
-                review_round = 1  # Default to first review round
-                source_internal_task_id = None
-
-                # Find the most recent completed modeling task for this deliverable
+                # Find the most recent completed task for this deliverable
                 recent_task_query = await session.execute(
                     select(InternalTask)
                     .filter(
                         InternalTask.deliverable_id == command.deliverable_id,
-                        InternalTask.task_type == "MODELING",
                         InternalTask.status == "DONE",
                     )
                     .order_by(InternalTask.updated_at.desc())
                     .limit(1)
                 )
                 recent_task = recent_task_query.scalar_one_or_none()
-                if recent_task:
-                    source_internal_task_id = recent_task.id
+                source_internal_task_id = recent_task.id if recent_task else None
+
+                # Check if this is a rework task by looking at the parent_task_id
+                is_rework_task = False
+                if recent_task and recent_task.parent_task_id:
+                    is_rework_task = True
+                    logger.info(f"Detected rework task {recent_task.id} with parent {recent_task.parent_task_id}")
+
+                # Determine review round based on task type
+                if is_rework_task:
+                    # For rework tasks, find the original task and increment review round
+                    original_task_id = recent_task.parent_task_id
+                    
+                    # Get the maximum review round for the original task
+                    review_round_result = await session.execute(
+                        select(func.coalesce(func.max(ReviewItem.review_round), 0))
+                        .filter(
+                            ReviewItem.source_internal_task_id == original_task_id
+                        )
+                    )
+                    current_max_round = review_round_result.scalar()
+                    review_round = current_max_round + 1
+                    
+                    logger.info(f"Rework task: Original task {original_task_id}, current max round: {current_max_round}, new round: {review_round}")
+                else:
+                    # For regular tasks, start with round 1
+                    review_round = 1
+                    logger.info(f"Regular task: Starting with review round {review_round}")
 
                 # Use sequence_number from command or auto-generate
                 if command.sequence_number is not None:
                     sequence_number = command.sequence_number
                 else:
                     # Auto-generate sequence number if not provided
-                    from sqlalchemy import func
                     result = await session.execute(
                         select(func.coalesce(func.max(ReviewItem.sequence_number), 0)).filter(
                             ReviewItem.deliverable_id == command.deliverable_id
@@ -251,29 +271,43 @@ class ReviewManagementService:
                     max_sequence = result.scalar()
                     sequence_number = max_sequence + 1
 
-                # Check for idempotency: Check by platform_file_id and sequence if available
-                if command.platform_file_id:
+                # Check for idempotency: Different logic for rework vs regular tasks
+                existing_review_item = None
+                if is_rework_task:
+                    # For rework tasks, check if a review item already exists for this specific task and review round
                     existing_review_item_query = await session.execute(
                         select(ReviewItem).filter(
                             ReviewItem.deliverable_id == command.deliverable_id,
-                            ReviewItem.platform_file_id == command.platform_file_id,
-                            ReviewItem.sequence_number == sequence_number,
-                        )
-                    )
-                else:
-                    # Fallback to old idempotency check for backwards compatibility
-                    existing_review_item_query = await session.execute(
-                        select(ReviewItem).filter(
-                            ReviewItem.deliverable_id == command.deliverable_id,
-                            ReviewItem.item_type == ReviewItemType(command.review_item_type),
+                            ReviewItem.source_internal_task_id == recent_task.id,
                             ReviewItem.review_round == review_round,
                         )
                     )
+                    existing_review_item = existing_review_item_query.scalar_one_or_none()
+                else:
+                    # For regular tasks, check by platform_file_id and sequence if available
+                    if command.platform_file_id:
+                        existing_review_item_query = await session.execute(
+                            select(ReviewItem).filter(
+                                ReviewItem.deliverable_id == command.deliverable_id,
+                                ReviewItem.platform_file_id == command.platform_file_id,
+                                ReviewItem.sequence_number == sequence_number,
+                            )
+                        )
+                    else:
+                        # Fallback to old idempotency check for backwards compatibility
+                        existing_review_item_query = await session.execute(
+                            select(ReviewItem).filter(
+                                ReviewItem.deliverable_id == command.deliverable_id,
+                                ReviewItem.item_type == ReviewItemType(command.review_item_type),
+                                ReviewItem.review_round == review_round,
+                            )
+                        )
+                    existing_review_item = existing_review_item_query.scalar_one_or_none()
                 
-                if existing_review_item_query.scalar_one_or_none():
+                if existing_review_item:
                     logger.warning(
                         f"Review item for deliverable {command.deliverable_id}, type {command.review_item_type}, "
-                        f"file_id {command.platform_file_id}, sequence {sequence_number} already exists. Skipping creation. Idempotent."
+                        f"file_id {command.platform_file_id}, sequence {sequence_number}, round {review_round} already exists. Skipping creation. Idempotent."
                     )
                     return
 
@@ -284,10 +318,13 @@ class ReviewManagementService:
                     else str(deliverable.deliverable_type)
                 )
                 
+                # Set the source task ID to the actual task that generated this review item
+                actual_source_task_id = recent_task.id if recent_task else source_internal_task_id
+                
                 new_review_item = ReviewItem(
                     project_id=command.project_id,
                     deliverable_id=command.deliverable_id,
-                    source_internal_task_id=source_internal_task_id,
+                    source_internal_task_id=actual_source_task_id,
                     item_type=ReviewItemType(
                         command.review_item_type
                     ),  # Convert string to enum
@@ -304,7 +341,8 @@ class ReviewManagementService:
                 await session.refresh(new_review_item)
 
                 logger.info(
-                    f"ReviewManagementService: Created new ReviewItem {new_review_item.id} for Deliverable {command.deliverable_id}, Round {review_round}."
+                    f"ReviewManagementService: Created new ReviewItem {new_review_item.id} for Deliverable {command.deliverable_id}, "
+                    f"Round {review_round}, Task {actual_source_task_id}, {'Rework' if is_rework_task else 'Regular'} task."
                 )
 
                 # (Optional) Publish event that a review item was created
@@ -396,8 +434,7 @@ class ReviewManagementService:
                         feedback=new_feedback
                     )
                 elif event.feedback_type == FeedbackType.LIKE.value:
-                    # 'Like' might not change review_status, or change to 'CLIENT_LIKED' if that's a status
-                    pass
+                    review_item.review_status = ReviewStatus.LIKED.value
                 session.add(review_item)  # Mark for update
 
                 await session.commit()
@@ -458,15 +495,14 @@ class ReviewManagementService:
                 project_id=review_item.project_id,
                 deliverable_id=review_item.deliverable_id,
                 parent_task_id=source_task.id,
+                task_name=f"Rework: {source_task.task_name}",
                 task_type=source_task.task_type,  # Same type as original
-                title=f"Rework: {source_task.title}",
                 description=f"Rework required based on feedback: {feedback.comment_text or 'No specific comments provided'}",
                 status=TaskStatus.TODO.value,
-                assigned_to=source_task.assigned_to,  # Assign to same person
                 priority=source_task.priority,  # Same priority
-                estimated_hours=source_task.estimated_hours / 2,  # Half the original estimate
-                due_date=datetime.utcnow(),  # Due immediately
-                is_rework=True
+                estimated_hours=source_task.estimated_hours / 2 if source_task.estimated_hours else None,  # Half the original estimate
+                tentative_end_date=datetime.utcnow(),  # Due immediately
+                start_date=datetime.utcnow()  # Start immediately
             )
             
             session.add(rework_task)
@@ -571,6 +607,9 @@ class ReviewManagementService:
                             new_platform_file_id=new_platform_file_id,
                             feedback=feedback
                         )
+                
+                elif feedback_type == FeedbackType.LIKE.value:
+                    review_item.review_status = ReviewStatus.LIKED.value
                 
                 session.add(review_item)
                 await session.commit()
@@ -1052,10 +1091,9 @@ class ReviewManagementService:
                         if task:
                             task_details = {
                                 "task_id": str(task.id),
-                                "title": task.title,
+                                "task_name": task.task_name,
                                 "status": task.status,
-                                "assigned_to": str(task.assigned_to) if task.assigned_to else None,
-                                "due_date": task.due_date.isoformat() if task.due_date else None
+                                "tentative_end_date": task.tentative_end_date.isoformat() if task.tentative_end_date else None
                             }
                     
                     # Format the feedback entry

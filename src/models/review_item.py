@@ -43,6 +43,7 @@ class ReviewStatus(enum.Enum):
     APPROVED = "APPROVED"  # Client has approved this item  
     REJECTED = "REJECTED"  # Client has rejected this item
     NEEDS_REVISION = "NEEDS_REVISION"  # Client has provided comments requiring revisions
+    LIKED = "LIKED"  # Client has liked this item (positive feedback without full approval)
 
 
 # --- ReviewItem ORM Model ---

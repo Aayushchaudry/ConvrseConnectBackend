@@ -34,7 +34,7 @@ class ReviewFeedback(Base):
     
     # Feedback type and content
     feedback_type = Column(
-        Enum(FeedbackType, schema="connect_backend"), 
+        Enum(FeedbackType, name="feedbacktype", schema="connect_backend"), 
         nullable=False
     )
     comment_text = Column(Text, nullable=True)
