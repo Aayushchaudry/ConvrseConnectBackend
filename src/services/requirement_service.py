@@ -1,6 +1,7 @@
 # src/services/requirement_service.py
 
 import logging
+from datetime import datetime
 from typing import List, Optional, Dict, Any, Set
 from uuid import UUID
 
@@ -465,6 +466,63 @@ class RequirementService:
         requirement_files = await self.get_requirement_files(requirement_id)
         
         logger.info(f"Successfully uploaded {len(files)} files for requirement {requirement_id}")
+        return requirement_files
+
+    async def associate_requirement_files(
+        self,
+        requirement_id: UUID,
+        platform_file_ids: List[UUID],
+        user_context: Optional[Dict[str, Any]] = None
+    ) -> List[RequirementFile]:
+        """
+        Associate platform service file UUIDs with a requirement.
+        
+        Args:
+            requirement_id: ID of the requirement
+            platform_file_ids: List of platform service file UUIDs
+            user_context: User context containing user_id and other auth info
+            
+        Returns:
+            List[RequirementFile]: Created requirement file records
+        """
+        logger.info(f"Associating {len(platform_file_ids)} file UUIDs with requirement {requirement_id}")
+
+        # Validate requirement exists and is of FILE_UPLOAD type
+        requirement = await self._get_requirement_by_id(requirement_id)
+        if not requirement:
+            raise ValueError(f"Requirement with ID {requirement_id} not found")
+        
+        if requirement.requirement_type != RequirementType.FILE_UPLOAD:
+            raise ValueError(f"Requirement {requirement_id} is not of type FILE_UPLOAD")
+
+        # Create requirement file records for each platform file UUID
+        requirement_files = []
+        for platform_file_id in platform_file_ids:
+            requirement_file = RequirementFile(
+                requirement_id=requirement_id,
+                platform_file_id=platform_file_id,
+                file_name=f"File_{platform_file_id}",  # Placeholder - could be fetched from platform service
+                file_type="unknown",  # Placeholder - could be fetched from platform service
+                file_size=0,  # Placeholder - could be fetched from platform service
+                uploaded_by=UUID(user_context.get('user_id')) if user_context and user_context.get('user_id') else None,
+                upload_timestamp=datetime.utcnow(),
+                is_active=True
+            )
+            
+            self.db_session.add(requirement_file)
+            requirement_files.append(requirement_file)
+
+        # Update requirement status to RECEIVED
+        await self.update_requirement_status(requirement_id, RequirementStatus.RECEIVED, platform_file_ids)
+        
+        # Commit all changes
+        await self.db_session.commit()
+        
+        # Refresh all objects to get updated data
+        for req_file in requirement_files:
+            await self.db_session.refresh(req_file)
+
+        logger.info(f"Successfully associated {len(platform_file_ids)} files with requirement {requirement_id}")
         return requirement_files
 
     async def update_requirement_status(

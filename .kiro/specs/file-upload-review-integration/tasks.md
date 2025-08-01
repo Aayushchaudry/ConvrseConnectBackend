@@ -158,7 +158,7 @@ This implementation plan converts the file upload and review integration design 
     - Add performance tests for file upload and processing
     - _Requirements: All requirements_
  
-  - [ ] 9.3 Create automated Postman test collection
+  - [x] 9.3 Create automated Postman test collection
     - Create Postman collection for requirement file upload workflows
     - Add Postman tests for review item file upload and feedback
     - Implement automated test scripts for end-to-end workflows
@@ -166,7 +166,22 @@ This implementation plan converts the file upload and review integration design 
     - Write test documentation and execution guides
     - _Requirements: All requirements_
 
-- [ ] 10. Implement monitoring and observability
+- [ ] 10. Fix frontend API routing and S3 integration
+  - [ ] 10.1 Fix RequirementService API endpoints
+    - Update uploadRequirementFile to use correct `/files` endpoint instead of `/upload`
+    - Implement S3 workflow integration using fileUploadService
+    - Add multiple file upload support with progress tracking
+    - Update RequirementSlice to handle S3 upload workflow
+    - _Requirements: 1.1, 1.3_
+
+  - [ ] 10.2 Enhance RequirementsModal with proper file upload components
+    - Integrate RequirementFileManager component for complete file management
+    - Add drag-and-drop file upload interface
+    - Implement file list display with download/delete functionality
+    - Add progress tracking and error handling for uploads
+    - _Requirements: 1.1, 1.5, 6.4_
+
+- [ ] 11. Implement monitoring and observability
   - [ ] 10.1 Create file operation metrics and monitoring
     - Implement metrics collection for file upload success/failure rates
     - Add monitoring for review process completion times

@@ -22,5 +22,6 @@
 			"path": "../../../../platform-service"
 		}
 	],
-	"settings": {}
+	"settings": {
+	}
 }

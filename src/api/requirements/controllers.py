@@ -3,11 +3,8 @@ Requirements endpoint controllers.
 Handles Requirement updates, file uploads, and management.
 """
 
-# File upload functionality for requirements
-from fastapi import UploadFile, File
+# File association functionality for requirements
 from src.services.file_upload_integration_service import (
-    FileUploadIntegrationService,
-    RequirementFileMetadata,
     FileUploadError,
     FileUploadErrorHandler
 )
@@ -58,6 +55,10 @@ class RequirementResponse(BaseModel):
     is_mandatory: bool
     created_at: datetime
     updated_at: datetime
+
+class RequirementFileRequest(BaseModel):
+    """Schema for associating platform service file UUIDs with requirements"""
+    files: List[UUID] = Field(..., description="List of platform service file UUIDs to associate with the requirement")
 
     class Config:
         from_attributes = True
@@ -938,16 +939,16 @@ async def get_deliverable_requirements_summary(
 @router.post("/{requirement_id}/files", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_requirement_files(
     requirement_id: UUID,
-    files: List[UploadFile] = File(...),
+    file_request: RequirementFileRequest,
     request: Request = None,
     auth_context: AuthContext = Depends(require_resource_permission("requirements", "update")),
     db_session: AsyncSession = Depends(get_db_session),
 ):
     """
-    Upload files for a requirement.
+    Associate platform service file UUIDs with a requirement.
     Requires 'requirements.update' permission.
     """
-    logger.info(f"Uploading files for requirement {requirement_id}")
+    logger.info(f"Associating {len(file_request.files)} file UUIDs with requirement {requirement_id}")
     
     try:
         requirement_service = RequirementService(db_session)
@@ -958,10 +959,10 @@ async def upload_requirement_files(
             "business_id": auth_context.business_id
         }
         
-        # Upload files
-        uploaded_files = await requirement_service.upload_requirement_files(
+        # Associate platform service file UUIDs with requirement
+        associated_files = await requirement_service.associate_requirement_files(
             requirement_id=requirement_id,
-            files=files,
+            platform_file_ids=file_request.files,
             user_context=user_context
         )
         
@@ -980,35 +981,33 @@ async def upload_requirement_files(
                 created_at=file.created_at,
                 updated_at=file.updated_at
             )
-            for file in uploaded_files
+            for file in associated_files
         ]
-        
-        platform_file_ids = [file.platform_file_id for file in uploaded_files]
         
         return FileUploadResponse(
             success=True,
-            message=f"Successfully uploaded {len(files)} file(s)",
+            message=f"Successfully associated {len(file_request.files)} file(s) with requirement",
             uploaded_files=file_responses,
-            platform_file_ids=platform_file_ids
+            platform_file_ids=file_request.files
         )
         
     except FileUploadError as fe:
-        logger.error(f"File upload error: {fe}")
+        logger.error(f"File association error: {fe}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File upload failed: {fe.details}"
+            detail=f"File association failed: {fe.details}"
         )
     except ValueError as ve:
-        logger.error(f"Validation error uploading files: {ve}")
+        logger.error(f"Validation error associating files: {ve}")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(ve)
         )
     except Exception as e:
-        logger.error(f"Error uploading requirement files: {e}", exc_info=True)
+        logger.error(f"Error associating requirement files: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload files: {str(e)}"
+            detail=f"Failed to associate files: {str(e)}"
         )
 
 
