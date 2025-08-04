@@ -217,22 +217,43 @@ class ReviewManagementService:
 
         async with self.db_session_factory() as session:
             try:
-                project, deliverable, internal_task = await self._get_context_entities(
-                    session, command.project_id, command.deliverable_id
-                )
-
-                # Skip review item creation for project-level tasks without deliverable_id
-                if command.deliverable_id is None:
-                    logger.info(
-                        f"ReviewManagementService: Skipping review item creation for project-level task without deliverable_id. Project: {command.project_id}"
+                # First, let's determine the actual deliverable_id by finding the most recent completed task
+                # This handles cases where the command might have None deliverable_id for project-level tasks
+                actual_deliverable_id = command.deliverable_id
+                
+                if actual_deliverable_id is None:
+                    # For project-level tasks, try to find a completed task and use its deliverable_id
+                    recent_task_query = await session.execute(
+                        select(InternalTask)
+                        .filter(
+                            InternalTask.project_id == command.project_id,
+                            InternalTask.status == "DONE",
+                        )
+                        .order_by(InternalTask.updated_at.desc())
+                        .limit(1)
                     )
-                    return
+                    recent_task = recent_task_query.scalar_one_or_none()
+                    
+                    if recent_task and recent_task.deliverable_id:
+                        actual_deliverable_id = recent_task.deliverable_id
+                        logger.info(
+                            f"ReviewManagementService: Found deliverable_id {actual_deliverable_id} from recent task {recent_task.id}"
+                        )
+                    else:
+                        logger.info(
+                            f"ReviewManagementService: Skipping review item creation for project-level task without deliverable_id. Project: {command.project_id}"
+                        )
+                        return
+
+                project, deliverable, internal_task = await self._get_context_entities(
+                    session, command.project_id, actual_deliverable_id
+                )
 
                 # Find the most recent completed task for this deliverable
                 recent_task_query = await session.execute(
                     select(InternalTask)
                     .filter(
-                        InternalTask.deliverable_id == command.deliverable_id,
+                        InternalTask.deliverable_id == actual_deliverable_id,
                         InternalTask.status == "DONE",
                     )
                     .order_by(InternalTask.updated_at.desc())
@@ -275,7 +296,7 @@ class ReviewManagementService:
                     # Auto-generate sequence number if not provided
                     result = await session.execute(
                         select(func.coalesce(func.max(ReviewItem.sequence_number), 0)).filter(
-                            ReviewItem.deliverable_id == command.deliverable_id
+                            ReviewItem.deliverable_id == actual_deliverable_id
                         )
                     )
                     max_sequence = result.scalar()
@@ -287,7 +308,7 @@ class ReviewManagementService:
                     # For rework tasks, check if a review item already exists for this specific task and review round
                     existing_review_item_query = await session.execute(
                         select(ReviewItem).filter(
-                            ReviewItem.deliverable_id == command.deliverable_id,
+                            ReviewItem.deliverable_id == actual_deliverable_id,
                             ReviewItem.source_internal_task_id == recent_task.id,
                             ReviewItem.review_round == review_round,
                         )
@@ -298,7 +319,7 @@ class ReviewManagementService:
                     if command.platform_file_id:
                         existing_review_item_query = await session.execute(
                             select(ReviewItem).filter(
-                                ReviewItem.deliverable_id == command.deliverable_id,
+                                ReviewItem.deliverable_id == actual_deliverable_id,
                                 ReviewItem.platform_file_id == command.platform_file_id,
                                 ReviewItem.sequence_number == sequence_number,
                             )
@@ -307,7 +328,7 @@ class ReviewManagementService:
                         # Fallback to old idempotency check for backwards compatibility
                         existing_review_item_query = await session.execute(
                             select(ReviewItem).filter(
-                                ReviewItem.deliverable_id == command.deliverable_id,
+                                ReviewItem.deliverable_id == actual_deliverable_id,
                                 ReviewItem.item_type == ReviewItemType(command.review_item_type),
                                 ReviewItem.review_round == review_round,
                             )
@@ -316,7 +337,7 @@ class ReviewManagementService:
                 
                 if existing_review_item:
                     logger.warning(
-                        f"Review item for deliverable {command.deliverable_id}, type {command.review_item_type}, "
+                        f"Review item for deliverable {actual_deliverable_id}, type {command.review_item_type}, "
                         f"file_id {command.platform_file_id}, sequence {sequence_number}, round {review_round} already exists. Skipping creation. Idempotent."
                     )
                     return
@@ -337,7 +358,7 @@ class ReviewManagementService:
                 
                 new_review_item = ReviewItem(
                     project_id=command.project_id,
-                    deliverable_id=command.deliverable_id,
+                    deliverable_id=actual_deliverable_id,
                     source_internal_task_id=actual_source_task_id,
                     item_type=ReviewItemType(
                         command.review_item_type
@@ -355,7 +376,7 @@ class ReviewManagementService:
                 await session.refresh(new_review_item)
 
                 logger.info(
-                    f"ReviewManagementService: Created new ReviewItem {new_review_item.id} for Deliverable {command.deliverable_id}, "
+                    f"ReviewManagementService: Created new ReviewItem {new_review_item.id} for Deliverable {actual_deliverable_id}, "
                     f"Round {review_round}, Task {actual_source_task_id}, {'Rework' if is_rework_task else 'Regular'} task."
                 )
 
@@ -370,7 +391,7 @@ class ReviewManagementService:
                 # Publish a DeliverableFailedEvent or specific ReviewItemCreationFailedEvent
             except Exception as e:
                 logger.error(
-                    f"Error generating review item for Deliverable {command.deliverable_id}: {e}",
+                    f"Error generating review item for Deliverable {actual_deliverable_id if 'actual_deliverable_id' in locals() else command.deliverable_id}: {e}",
                     exc_info=True,
                 )
                 await session.rollback()
