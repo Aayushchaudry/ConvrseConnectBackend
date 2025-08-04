@@ -965,6 +965,12 @@ async def upload_requirement_files(
             platform_file_ids=file_request.files,
             user_context=user_context
         )
+
+        await requirement_service.update_requirement_status(
+            requirement_id=requirement_id,
+            file_ids=file_request.files,
+            status=RequirementStatus.RECEIVED
+        )
         
         # Convert to response format
         file_responses = [

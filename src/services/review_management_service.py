@@ -67,10 +67,12 @@ class ReviewManagementService:
         )
         project = project_result.scalar_one_or_none()
 
-        deliverable_result = await session.execute(
-            select(Deliverable).filter(Deliverable.id == deliverable_id)
-        )
-        deliverable = deliverable_result.scalar_one_or_none()
+        deliverable = None
+        if deliverable_id is not None:
+            deliverable_result = await session.execute(
+                select(Deliverable).filter(Deliverable.id == deliverable_id)
+            )
+            deliverable = deliverable_result.scalar_one_or_none()
 
         internal_task = None
         if source_internal_task_id:
@@ -79,10 +81,11 @@ class ReviewManagementService:
             )
             internal_task = internal_task_result.scalar_one_or_none()
 
-        if not project or not deliverable:
-            raise ValueError(
-                f"Project {project_id} or Deliverable {deliverable_id} not found."
-            )
+        if not project:
+            raise ValueError(f"Project {project_id} not found.")
+        
+        if deliverable_id is not None and not deliverable:
+            raise ValueError(f"Deliverable {deliverable_id} not found.")
 
         return project, deliverable, internal_task
 
@@ -218,6 +221,13 @@ class ReviewManagementService:
                     session, command.project_id, command.deliverable_id
                 )
 
+                # Skip review item creation for project-level tasks without deliverable_id
+                if command.deliverable_id is None:
+                    logger.info(
+                        f"ReviewManagementService: Skipping review item creation for project-level task without deliverable_id. Project: {command.project_id}"
+                    )
+                    return
+
                 # Find the most recent completed task for this deliverable
                 recent_task_query = await session.execute(
                     select(InternalTask)
@@ -311,12 +321,16 @@ class ReviewManagementService:
                     )
                     return
 
-                # Handle both string and enum deliverable_type
-                deliverable_type_str = (
-                    deliverable.deliverable_type.value 
-                    if hasattr(deliverable.deliverable_type, 'value') 
-                    else str(deliverable.deliverable_type)
-                )
+                # Handle both string and enum deliverable_type, with None check
+                if deliverable and deliverable.deliverable_type:
+                    deliverable_type_str = (
+                        deliverable.deliverable_type.value 
+                        if hasattr(deliverable.deliverable_type, 'value') 
+                        else str(deliverable.deliverable_type)
+                    )
+                else:
+                    # For project-level tasks without a specific deliverable
+                    deliverable_type_str = "PROJECT_TASK"
                 
                 # Set the source task ID to the actual task that generated this review item
                 actual_source_task_id = recent_task.id if recent_task else source_internal_task_id

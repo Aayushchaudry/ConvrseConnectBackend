@@ -74,6 +74,18 @@ class ProjectLifecycleOrchestrator:
             }
         )
 
+    def _get_project_id(self, event):
+        """
+        Safely extract project_id from either an event object or dict.
+        """
+        if hasattr(event, 'project_id'):
+            return event.project_id
+        elif isinstance(event, dict) and 'project_id' in event:
+            return event['project_id']
+        else:
+            logger.warning(f"Could not extract project_id from event: {event}")
+            return None
+
     async def on_project_created(self, event: ProjectCreatedEvent):
         """
         Handles the ProjectCreatedEvent to initiate the Project Lifecycle SAGA.
@@ -386,38 +398,58 @@ class ProjectLifecycleOrchestrator:
         Handles task completion events (InternalTaskCompletedEvent or InternalTaskCompletedWithMediaEvent).
         When any task is completed, it indicates work has begun and project should move from 'initiated' to 'in_progress'.
         """
-        project_id = event.project_id
+        project_id = self._get_project_id(event)
+        if not project_id:
+            logger.error(f"Could not extract project_id from task completion event: {event}")
+            return
+            
         logger.info(
             f"ProjectLifecycleOrchestrator: Received task completion event for Project {project_id}. Checking if project status should progress."
         )
 
-        await self._progress_project_from_initiated_to_in_progress(project_id, f"Task {event.task_id} completed")
+        # Safely get task_id
+        task_id = getattr(event, 'task_id', None) or (event.get('task_id') if isinstance(event, dict) else None)
+        await self._progress_project_from_initiated_to_in_progress(project_id, f"Task {task_id} completed")
 
-    async def on_task_status_updated(self, event: InternalTaskStatusUpdatedEvent):
+    async def on_task_status_updated(self, event):
         """
         Handles task status updates. When a task moves to 'in-progress', it indicates work has begun.
         """
-        project_id = event.project_id
+        project_id = self._get_project_id(event)
+        if not project_id:
+            logger.error(f"Could not extract project_id from task status update event: {event}")
+            return
+        
+        # Safely get new_status and task_id
+        new_status = getattr(event, 'new_status', None) or (event.get('new_status') if isinstance(event, dict) else None)
+        task_id = getattr(event, 'task_id', None) or (event.get('task_id') if isinstance(event, dict) else None)
         
         # Only trigger progression if task is now in-progress (work actually started)
-        if event.new_status.lower() in ['in-progress', 'in_progress']:
+        if new_status and new_status.lower() in ['in-progress', 'in_progress']:
             logger.info(
-                f"ProjectLifecycleOrchestrator: Task {event.task_id} moved to in-progress for Project {project_id}. Checking if project status should progress."
+                f"ProjectLifecycleOrchestrator: Task {task_id} moved to in-progress for Project {project_id}. Checking if project status should progress."
             )
-            await self._progress_project_from_initiated_to_in_progress(project_id, f"Task {event.task_id} started (in-progress)")
+            await self._progress_project_from_initiated_to_in_progress(project_id, f"Task {task_id} started (in-progress)")
 
-    async def on_requirement_updated(self, event: RequirementUpdatedEvent):
+    async def on_requirement_updated(self, event):
         """
         Handles requirement status updates. When a requirement is completed/approved, it indicates progress.
         """
-        project_id = event.project_id
+        project_id = self._get_project_id(event)
+        if not project_id:
+            logger.error(f"Could not extract project_id from requirement update event: {event}")
+            return
+        
+        # Safely get new_status and requirement_id
+        new_status = getattr(event, 'new_status', None) or (event.get('new_status') if isinstance(event, dict) else None)
+        requirement_id = getattr(event, 'requirement_id', None) or (event.get('requirement_id') if isinstance(event, dict) else None)
         
         # Only trigger progression if requirement is now done/completed
-        if event.new_status.lower() in ['received', 'approved']:
+        if new_status and new_status.lower() in ['received', 'approved']:
             logger.info(
-                f"ProjectLifecycleOrchestrator: Requirement {event.requirement_id} marked as {event.new_status} for Project {project_id}. Checking if project status should progress."
+                f"ProjectLifecycleOrchestrator: Requirement {requirement_id} marked as {new_status} for Project {project_id}. Checking if project status should progress."
             )
-            await self._progress_project_from_initiated_to_in_progress(project_id, f"Requirement {event.requirement_id} completed ({event.new_status})")
+            await self._progress_project_from_initiated_to_in_progress(project_id, f"Requirement {requirement_id} completed ({new_status})")
 
     async def _progress_project_from_initiated_to_in_progress(self, project_id: UUID, reason: str):
         """
@@ -437,7 +469,16 @@ class ProjectLifecycleOrchestrator:
                     return
                 
                 # Only progress if currently in 'initiated' status
-                if project.status == ProjectStatus.INITIATED:
+                # Handle both enum and string comparisons
+                current_status = project.status
+                if isinstance(current_status, ProjectStatus):
+                    current_status_value = current_status.value
+                    is_initiated = current_status == ProjectStatus.INITIATED
+                else:
+                    current_status_value = current_status
+                    is_initiated = current_status == ProjectStatus.INITIATED.value
+                
+                if is_initiated:
                     logger.info(
                         f"ProjectLifecycleOrchestrator: Progressing Project {project_id} from 'initiated' to 'in_progress'. Reason: {reason}"
                     )
@@ -469,7 +510,7 @@ class ProjectLifecycleOrchestrator:
                     
                 else:
                     logger.debug(
-                        f"ProjectLifecycleOrchestrator: Project {project_id} is already in '{project.status.value}' status. No progression needed."
+                        f"ProjectLifecycleOrchestrator: Project {project_id} is already in '{current_status_value}' status. No progression needed."
                     )
                     
             except Exception as e:
@@ -520,8 +561,11 @@ class ProjectLifecycleOrchestrator:
             try:
                 await handler(event_obj)
             except Exception as e:
+                # Safely get project_id for error logging
+                project_id = self._get_project_id(event_obj) or "unknown"
+                
                 logger.error(
-                    f"Error handling event {event_type} for Project {event_obj.project_id}: {e}",
+                    f"Error handling event {event_type} for Project {project_id}: {e}",
                     exc_info=True,
                 )
                 # Here, you might publish a SagaFailedEvent or handle retry logic
