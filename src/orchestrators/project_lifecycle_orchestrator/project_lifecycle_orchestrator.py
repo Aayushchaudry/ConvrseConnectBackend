@@ -145,64 +145,66 @@ class ProjectLifecycleOrchestrator:
                 deliverable_service = DeliverableService(db_session=session, event_bus=event_bus_instance)
                 for deliverable_type_str in event.deliverable_types:
                     try:
-                        deliverable_type_enum = DeliverableType(deliverable_type_str)
+                        # Handle dynamic rendered_images_* values
+                        if deliverable_type_str.startswith("rendered_images_") and deliverable_type_str != "rendered_images":
+                            # Use the base RENDERED_IMAGES enum for the service call
+                            deliverable_type_enum = DeliverableType.RENDERED_IMAGES
+                            # Extract render number for quantity field
+                            try:
+                                render_number = int(deliverable_type_str.split("_")[-1])
+                                deliverable_quantity = render_number
+                                # Use deliverable_sub_type for interior/exterior from the event
+                                deliverable_sub_type = event.deliverable_sub_types.get(deliverable_type_str, "exterior")
+                            except ValueError:
+                                deliverable_quantity = 1
+                                deliverable_sub_type = event.deliverable_sub_types.get(deliverable_type_str, "exterior")
+                        else:
+                            # For regular enum values, try to create the enum
+                            try:
+                                deliverable_type_enum = DeliverableType(deliverable_type_str)
+                                deliverable_sub_type = event.deliverable_sub_types.get(deliverable_type_str, "exterior")
+                                deliverable_quantity = None  # No quantity for non-rendered images
+                            except ValueError:
+                                # If the enum doesn't exist, use RENDERED_IMAGES as fallback
+                                deliverable_type_enum = DeliverableType.RENDERED_IMAGES
+                                deliverable_sub_type = event.deliverable_sub_types.get(deliverable_type_str, "exterior")
+                                deliverable_quantity = None
+                        
                         custom_timeline_days = event.deliverable_timeline_days.get(deliverable_type_str)
                         if custom_timeline_days:
                             timeline_days = custom_timeline_days
                         else:
                             # Set reasonable defaults for timeline based on deliverable type
-                            if deliverable_type_enum == DeliverableType.RENDERED_IMAGES:
+                            if deliverable_type_str == "rendered_images":
                                 timeline_days = 14
-                            elif deliverable_type_enum == DeliverableType.TECHNICAL_RENDERS:
+                            elif deliverable_type_str.startswith("rendered_images_"): # Handle dynamic rendered_images_*
+                                timeline_days = 14 # Default timeline for each render
+                            elif deliverable_type_str == "technical_renders":
                                 timeline_days = 10
-                            elif deliverable_type_enum == DeliverableType.EXTERIOR_VR_TOUR:
+                            elif deliverable_type_str == "exterior_vr_tour":
                                 timeline_days = 21
-                            elif deliverable_type_enum == DeliverableType.ANIMATED_VR_TOUR:
+                            elif deliverable_type_str == "animated_vr_tour":
                                 timeline_days = 28
-                            elif deliverable_type_enum == DeliverableType.VIDEO_WALKTHROUGH:
+                            elif deliverable_type_str == "video_walkthrough":
                                 timeline_days = 21
-                            elif deliverable_type_enum == DeliverableType.INVENTORY_MODULE:
+                            elif deliverable_type_str == "inventory_module":
                                 timeline_days = 14
-                            elif deliverable_type_enum == DeliverableType.LOCATION_MAP:
+                            elif deliverable_type_str == "location_map":
                                 timeline_days = 7
-                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_SALES_APP:
+                            elif deliverable_type_str == "interactive_sales_app":
                                 timeline_days = 35
-                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_DRONE_SHOOT:
+                            elif deliverable_type_str == "interactive_drone_shoot":
                                 timeline_days = 21
-                            elif deliverable_type_enum == DeliverableType.INTERPLAYER_SOFTWARE:
+                            elif deliverable_type_str == "interplayer_software_av_room":
                                 timeline_days = 28
                             else:
                                 timeline_days = 30  # Default fallback
-                        custom_sub_type = event.deliverable_sub_types.get(deliverable_type_str)
-                        if custom_sub_type:
-                            deliverable_sub_type = custom_sub_type.title()
-                        else:
-                            if deliverable_type_enum == DeliverableType.RENDERED_IMAGES:
-                                deliverable_sub_type = "Interior & Exterior Views"
-                            elif deliverable_type_enum == DeliverableType.TECHNICAL_RENDERS:
-                                deliverable_sub_type = "Technical Visualization"
-                            elif deliverable_type_enum == DeliverableType.EXTERIOR_VR_TOUR:
-                                deliverable_sub_type = "Exterior Virtual Tour"
-                            elif deliverable_type_enum == DeliverableType.ANIMATED_VR_TOUR:
-                                deliverable_sub_type = "Animated Virtual Tour"
-                            elif deliverable_type_enum == DeliverableType.VIDEO_WALKTHROUGH:
-                                deliverable_sub_type = "Video Walkthrough"
-                            elif deliverable_type_enum == DeliverableType.INVENTORY_MODULE:
-                                deliverable_sub_type = "Inventory Management"
-                            elif deliverable_type_enum == DeliverableType.LOCATION_MAP:
-                                deliverable_sub_type = "Location Mapping"
-                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_SALES_APP:
-                                deliverable_sub_type = "Interactive Sales Application"
-                            elif deliverable_type_enum == DeliverableType.INTERACTIVE_DRONE_SHOOT:
-                                deliverable_sub_type = "Drone Photography & Integration"
-                            elif deliverable_type_enum == DeliverableType.INTERPLAYER_SOFTWARE:
-                                deliverable_sub_type = "Interplayer AV Room Setup"
-                            else:
-                                deliverable_sub_type = "Standard"
+                        
                         created_deliverable = await deliverable_service.create_deliverable(
                             project_id=event.project_id,
                             deliverable_type=deliverable_type_enum,
                             deliverable_sub_type=deliverable_sub_type,
+                            deliverable_quantity=deliverable_quantity,
                             tentative_timeline_days=timeline_days,
                             created_by=project_created_by,
                             assigned_to=None,
@@ -211,9 +213,6 @@ class ProjectLifecycleOrchestrator:
                         deliverable_type_to_days[deliverable_type_str] = timeline_days
                         deliverable_type_to_subtype[deliverable_type_str] = deliverable_sub_type
                         logger.info(f"✅ ProjectLifecycleOrchestrator: Created deliverable {created_deliverable.id} of type {deliverable_type_str}")
-                    except ValueError as e:
-                        logger.error(f"❌ ProjectLifecycleOrchestrator: Invalid deliverable type '{deliverable_type_str}': {e}")
-                        continue
                     except Exception as e:
                         logger.error(f"❌ ProjectLifecycleOrchestrator: Failed to create deliverable '{deliverable_type_str}': {e}")
                         continue

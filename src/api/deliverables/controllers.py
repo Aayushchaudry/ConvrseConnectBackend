@@ -55,6 +55,7 @@ class DeliverableResponse(BaseModel):
     project_id: UUID
     deliverable_type: str  # Changed to string since we store string values
     deliverable_sub_type: Optional[str]
+    deliverable_quantity: Optional[int]  # NEW: For rendered images quantity
     current_status: str  # Changed to string since we store string values
     tentative_timeline_days: Optional[int]
     created_at: datetime

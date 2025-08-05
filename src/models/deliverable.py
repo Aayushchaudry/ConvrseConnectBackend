@@ -44,6 +44,31 @@ class DeliverableType(enum.Enum):
     INTERACTIVE_DRONE_SHOOT = "interactive_drone_shoot"
     INTERPLAYER_SOFTWARE = "interplayer_software_av_room"
 
+    @classmethod
+    def _missing_(cls, value):
+        """Handle dynamic rendered_images_* values for multiple renders."""
+        if isinstance(value, str) and value.startswith("rendered_images_") and value != "rendered_images":
+            try:
+                render_number = int(value.split("_")[-1])
+                if render_number >= 1:
+                    # Create a new enum member dynamically
+                    member_name = f"RENDERED_IMAGES_{render_number}"
+                    member_value = value
+                    
+                    # Create the enum member
+                    new_member = enum.Enum._member_type_.__new__(cls, member_name, member_value)
+                    new_member._name_ = member_name
+                    new_member._value_ = member_value
+                    
+                    # Add to the enum's member maps
+                    cls._member_map_[member_name] = new_member
+                    cls._value2member_map_[member_value] = new_member
+                    
+                    return new_member
+            except ValueError:
+                pass
+        return None
+
 
 # --- Deliverable ORM Model ---
 
@@ -63,16 +88,13 @@ class Deliverable(Base):
     project_id = Column(UUID(as_uuid=True), ForeignKey("connect_backend.projects.id"), nullable=False)
 
     # Type of deliverable (e.g., Rendered Images, VR Tour)
-    deliverable_type = Column(
-        ENUM("rendered_images", "technical_renders", "exterior_vr_tour", "animated_vr_tour", 
-             "video_walkthrough", "inventory_module", "location_map", "interactive_sales_app", 
-             "interactive_drone_shoot", "interplayer_software_av_room", 
-             name="deliverabletype", schema="connect_backend"), 
-        nullable=False
-    )
-
-    # Sub-type if applicable (e.g., 'Interior Requirement', 'Exterior Requirement')
+    deliverable_type = Column(String(100), nullable=False)
+    
+    # Sub-type for interior/exterior specification
     deliverable_sub_type = Column(String(100), nullable=True)
+    
+    # Quantity for rendered images (e.g., 5 for rendered_images_1 through rendered_images_5)
+    deliverable_quantity = Column(Integer, nullable=True)
 
     # Status of this specific deliverable within its lifecycle
     current_status = Column(

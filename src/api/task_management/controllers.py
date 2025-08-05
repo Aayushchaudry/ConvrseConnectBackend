@@ -335,6 +335,7 @@ async def get_task_deliverable_associations(
                 "id": str(d.id),
                 "deliverable_type": d.deliverable_type,
                 "deliverable_sub_type": d.deliverable_sub_type,
+                "deliverable_quantity": d.deliverable_quantity,  # NEW: For rendered images quantity
                 "current_status": d.current_status,
                 "tentative_timeline_days": d.tentative_timeline_days,
             }

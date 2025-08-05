@@ -45,6 +45,7 @@ class DeliverableService:
         project_id: UUID,
         deliverable_type: DeliverableType,
         deliverable_sub_type: Optional[str] = None,
+        deliverable_quantity: Optional[int] = None,
         tentative_timeline_days: Optional[int] = None,
         created_by: Optional[UUID] = None,
         assigned_to: Optional[UUID] = None,
@@ -55,7 +56,8 @@ class DeliverableService:
         Args:
             project_id: The ID of the project this deliverable belongs to.
             deliverable_type: The type of deliverable (from DeliverableType enum).
-            deliverable_sub_type: Optional sub-type (e.g., 'Interior').
+            deliverable_sub_type: Optional sub-type (e.g., 'Interior', 'Exterior').
+            deliverable_quantity: Optional quantity for rendered images (e.g., 1, 2, 3).
             tentative_timeline_days: Optional suggested timeline.
 
         Returns:
@@ -82,6 +84,7 @@ class DeliverableService:
             project_id=project_id,
             deliverable_type=deliverable_type.value,  # Use .value for string enum, consistent with current_status
             deliverable_sub_type=deliverable_sub_type,
+            deliverable_quantity=deliverable_quantity,
             tentative_timeline_days=tentative_timeline_days,
             current_status=DeliverableStatus.INFO_GATHERING.value,  # Use .value for string enum
             created_by=created_by,
